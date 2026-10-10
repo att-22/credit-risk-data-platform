@@ -1,0 +1,74 @@
+version: 2
+
+# Documentación y tests de los modelos de staging.
+# Los tests "genéricos" (unique, not_null...) se declaran aquí y dbt genera
+# solo la consulta SQL que los comprueba.
+
+models:
+  - name: stg_home_credit__application_train
+    description: "Solicitudes actuales con TARGET. Centinela de empleo y códigos XNA convertidos en NULL."
+    columns:
+      - name: SK_ID_CURR
+        description: "Identificador de la solicitud (clave primaria)."
+        data_tests:
+          - unique
+          - not_null
+      - name: TARGET
+        description: "1 = impago, 0 = paga sin incidencias."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+
+  - name: stg_home_credit__application_test
+    description: "Solicitudes actuales sin TARGET, con la misma limpieza que train."
+    columns:
+      - name: SK_ID_CURR
+        data_tests:
+          - unique
+          - not_null
+
+  - name: stg_home_credit__previous_application
+    description: "Solicitudes anteriores. Centinela en 5 columnas DAYS_* y 'XNA' en 10 columnas de texto convertidos en NULL."
+    columns:
+      - name: SK_ID_PREV
+        description: "Identificador de la solicitud anterior (clave primaria)."
+        data_tests:
+          - unique
+          - not_null
+      - name: SK_ID_CURR
+        data_tests:
+          - not_null
+
+  - name: stg_home_credit__bureau
+    columns:
+      - name: SK_ID_BUREAU
+        description: "Identificador del crédito en el buró (clave primaria)."
+        data_tests:
+          - unique
+          - not_null
+
+  - name: stg_home_credit__bureau_balance
+    columns:
+      - name: SK_ID_BUREAU
+        data_tests:
+          - not_null
+
+  - name: stg_home_credit__pos_cash_balance
+    columns:
+      - name: SK_ID_PREV
+        data_tests:
+          - not_null
+
+  - name: stg_home_credit__credit_card_balance
+    columns:
+      - name: SK_ID_PREV
+        data_tests:
+          - not_null
+
+  - name: stg_home_credit__installments_payments
+    columns:
+      - name: SK_ID_PREV
+        data_tests:
+          - not_null

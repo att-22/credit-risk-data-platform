@@ -1,0 +1,22 @@
+# ==========================================================================
+# dbt_project.yml — configuración del proyecto dbt
+# ==========================================================================
+name: credit_risk
+version: "1.0.0"
+
+# Qué conexión usar (definida en profiles.yml).
+profile: credit_risk
+
+# Dónde está cada tipo de archivo (son los valores por defecto).
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+# Carpetas que genera dbt al ejecutarse (no se versionan).
+clean-targets: ["target", "dbt_packages"]
+
+# Configuración por carpeta: cada capa se materializa de una forma distinta.
+models:
+  credit_risk:
+    staging:
+      +materialized: view   # vista: no copia datos, se calcula al consultarla

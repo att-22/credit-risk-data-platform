@@ -8,6 +8,12 @@ data/
 outputs/
 lake/
 
+# --- Artefactos de dbt (SQL compilado, logs, paquetes descargados) ---
+transform/target/
+transform/logs/
+transform/dbt_packages/
+transform/.user.yml
+
 # --- Modelos entrenados (se regeneran con el pipeline) ---
 *.joblib
 *.keras
