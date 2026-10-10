@@ -13,7 +13,7 @@ import pandas as pd
 from credit_risk.config import KEY_BUREAU, KEY_CURR, KEY_PREV
 
 # Valor centinela que la tabla principal usa para "sin empleo" en DAYS_EMPLOYED
-CENTINELA_EMPLEO = 365243
+CENTINELA_EMPLEO = 365000
 _IDS = {KEY_CURR, KEY_BUREAU, KEY_PREV}
 
 
