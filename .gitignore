@@ -1,0 +1,28 @@
+# --- Datos: nunca se versionan (pesan GB y tienen licencia de Kaggle) ---
+data/
+*.csv
+*.parquet
+*.zip
+
+# --- Modelos entrenados (se regeneran con el pipeline) ---
+*.joblib
+*.keras
+
+# --- Entornos virtuales de Python ---
+.venv/
+venv/
+
+# --- Archivos temporales que genera Python ---
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# --- Secretos y configuración local (rutas, claves) ---
+.env
+
+# --- Basura del sistema operativo / editores ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
