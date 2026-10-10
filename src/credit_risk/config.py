@@ -22,8 +22,10 @@ load_dotenv(ROOT / ".env")
 DATA_DIR = Path(os.getenv("DATA_DIR", ROOT / "data"))
 RAW_DIR = DATA_DIR / "raw"
 
-# Salidas generadas por este proyecto (siempre dentro del repositorio).
-OUTPUTS_DIR = ROOT / "outputs"
+# Salidas generadas por este proyecto (por defecto, ./outputs del repositorio).
+# También configurable: instalado como paquete (p. ej. en Docker), ROOT ya no
+# apunta al repositorio y hay que indicar la carpeta desde fuera.
+OUTPUTS_DIR = Path(os.getenv("OUTPUTS_DIR", ROOT / "outputs"))
 
 # Semilla para reproducibilidad
 RANDOM_STATE = 42

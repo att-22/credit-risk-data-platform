@@ -49,3 +49,16 @@ jobs:
 
       - name: Ejecutar los tests
         run: uv run pytest
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v5
+
+      - name: Construir la imagen
+        run: docker build -t credit-risk .
+
+      - name: Comprobar que el paquete funciona dentro de la imagen (prueba de humo)
+        run: docker run --rm credit-risk python -c "import credit_risk.verify_data; print('OK')"

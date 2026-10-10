@@ -1,0 +1,26 @@
+# Lo que Docker NO debe copiar al construir la imagen.
+# Igual que .gitignore, pero para `docker build`.
+
+# Entorno local: la imagen crea el suyo propio (y el de Windows no sirve en Linux)
+.venv/
+
+# Historial de Git, cachés y configuración de herramientas
+.git/
+.github/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.pre-commit-config.yaml
+
+# Secretos: NUNCA dentro de una imagen
+.env
+
+# Datos y salidas: se montan desde fuera al ejecutar, no se meten en la imagen
+data/
+outputs/
+*.csv
+*.parquet
+
+# Tests: no hacen falta para ejecutar la aplicación
+tests/
