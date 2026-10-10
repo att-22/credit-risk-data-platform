@@ -5,6 +5,7 @@ lo pida por su nombre. Usamos DataFrames pequeños escritos a mano: así los
 tests son rápidos, no dependen de los CSV reales y sabemos de antemano qué
 resultado es el correcto.
 """
+
 import numpy as np
 import pandas as pd
 import pytest

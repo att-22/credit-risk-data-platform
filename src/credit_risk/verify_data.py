@@ -7,6 +7,7 @@ outputs/dimensiones.csv. También resume la distribución de la variable objetiv
 Uso:
     uv run verify-data
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -28,12 +29,17 @@ def main() -> None:
         # Número de columnas: leemos solo la cabecera.
         cols = pd.read_csv(path, nrows=0).shape[1]
         # Número de filas: contamos sin cargar todo en memoria.
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             n_filas = sum(1 for _ in f) - 1  # -1 por la cabecera
         tam_mb = round(path.stat().st_size / (1024 * 1024), 1)
         filas_inventario.append(
-            {"tabla": nombre, "fichero": fichero, "filas": n_filas,
-             "columnas": cols, "tamaño_MB": tam_mb}
+            {
+                "tabla": nombre,
+                "fichero": fichero,
+                "filas": n_filas,
+                "columnas": cols,
+                "tamaño_MB": tam_mb,
+            }
         )
         print(f"[OK] {nombre:<22} {n_filas:>10,} filas x {cols:>3} columnas  ({tam_mb} MB)")
 
@@ -55,7 +61,7 @@ def main() -> None:
     print("\nDistribución de la variable objetivo (TARGET):")
     for clase in dist.index:
         print(f"  TARGET={clase}: {dist[clase]:>10,} ({pct[clase]:.2f} %)")
-    tasa = pct.get(1, float('nan'))
+    tasa = pct.get(1, float("nan"))
     print(f"\nTasa de impago (TARGET=1): {tasa:.2f} %")
 
 

@@ -1,0 +1,23 @@
+# Comprobaciones que se ejecutan automáticamente antes de cada `git commit`.
+# Si alguna falla, el commit se cancela hasta que se corrija.
+# Documentación: https://pre-commit.com
+repos:
+  # Ganchos genéricos mantenidos por el propio proyecto pre-commit.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace       # quita espacios al final de las líneas
+      - id: end-of-file-fixer         # asegura un salto de línea al final del archivo
+      - id: check-yaml                # valida la sintaxis de los .yaml
+      - id: check-toml                # valida la sintaxis de los .toml
+      - id: check-added-large-files   # impide subir archivos grandes (datos, modelos)
+        args: ["--maxkb=1000"]
+      - id: detect-private-key        # impide subir claves privadas por error
+
+  # Ruff: linter y formateador de Python.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.0
+    hooks:
+      - id: ruff-check                # busca errores y los corrige si puede
+        args: ["--fix"]
+      - id: ruff-format               # da formato al código

@@ -29,6 +29,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "ruff>=0.17.0",
 ]
@@ -37,3 +38,17 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+
+# Configuración de ruff (linter + formateador).
+[tool.ruff]
+line-length = 100           # longitud máxima de línea
+target-version = "py313"    # versión de Python del proyecto
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle: errores de estilo (PEP 8)
+    "F",   # pyflakes: errores reales (variables sin usar, imports que faltan...)
+    "I",   # isort: orden de los imports
+    "B",   # flake8-bugbear: patrones que suelen ser bugs
+    "UP",  # pyupgrade: sintaxis moderna de Python
+]

@@ -3,6 +3,7 @@
 Funciones sencillas para leer las tablas desde la carpeta de datos sin tener
 que recordar los nombres de fichero. Se apoya en la configuración de config.py.
 """
+
 from __future__ import annotations
 
 import pandas as pd

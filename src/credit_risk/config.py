@@ -4,6 +4,7 @@ Las rutas que dependen de cada máquina (dónde están los datos) NO se escriben
 el código: se leen de variables de entorno. Para desarrollo local se pueden
 definir en un archivo `.env` en la raíz del repositorio (ver `.env.example`).
 """
+
 import os
 from pathlib import Path
 

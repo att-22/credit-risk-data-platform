@@ -4,6 +4,7 @@ No usan los CSV reales: crean ficheros falsos en una carpeta temporal y hacen
 que el código apunte allí. Así los tests funcionan en cualquier máquina,
 incluido el servidor de CI, donde no están los 2,7 GB de datos.
 """
+
 import pandas as pd
 import pytest
 

@@ -4,6 +4,7 @@ Reúne la lógica reutilizable que transforma las tablas originales en variables
 listas para el modelado: limpieza de anomalías de la tabla principal, creación
 de ratios financieros y agregación del historial crediticio por cliente.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -58,9 +59,13 @@ def anadir_ratios(df: pd.DataFrame) -> pd.DataFrame:
     return df.replace([np.inf, -np.inf], np.nan)
 
 
-def agregar_por_cliente(df: pd.DataFrame, clave: str, prefijo: str,
-                        cat_cols: list[str] | None = None,
-                        funciones=("mean", "max", "min", "sum")) -> pd.DataFrame:
+def agregar_por_cliente(
+    df: pd.DataFrame,
+    clave: str,
+    prefijo: str,
+    cat_cols: list[str] | None = None,
+    funciones=("mean", "max", "min", "sum"),
+) -> pd.DataFrame:
     """Agrega una tabla de historial a nivel de la clave indicada.
 
     Calcula estadísticos de las variables numéricas y la proporción de cada
