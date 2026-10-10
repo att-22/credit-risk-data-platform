@@ -4,6 +4,9 @@ data/
 *.parquet
 *.zip
 
+# --- Salidas generadas por el código (se recrean ejecutándolo) ---
+outputs/
+
 # --- Modelos entrenados (se regeneran con el pipeline) ---
 *.joblib
 *.keras
