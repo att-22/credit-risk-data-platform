@@ -22,6 +22,11 @@ load_dotenv(ROOT / ".env")
 DATA_DIR = Path(os.getenv("DATA_DIR", ROOT / "data"))
 RAW_DIR = DATA_DIR / "raw"
 
+# Lago de datos local: aquí se escriben las capas de la arquitectura medallion
+# (bronze, silver, gold). Separado de DATA_DIR, que es solo de lectura.
+LAKE_DIR = Path(os.getenv("LAKE_DIR", ROOT / "lake"))
+BRONZE_DIR = LAKE_DIR / "bronze"
+
 # Salidas generadas por este proyecto (por defecto, ./outputs del repositorio).
 # También configurable: instalado como paquete (p. ej. en Docker), ROOT ya no
 # apunta al repositorio y hay que indicar la carpeta desde fuera.
