@@ -1,0 +1,29 @@
+# ==========================================================================
+# pyproject.toml — la "ficha" del proyecto Python (estándar PEP 621)
+# Sustituye a requirements.txt + setup.py en un único archivo.
+# ==========================================================================
+
+[project]
+name = "credit-risk"
+version = "0.1.0"
+description = "Plataforma de datos para scoring crediticio (Home Credit Default Risk)"
+readme = "README.md"
+authors = [{ name = "Adrià Tadeo Tormos" }]
+requires-python = ">=3.13"
+# Librerías que el código necesita para FUNCIONAR. Se rellenan con `uv add`.
+dependencies = [
+    "numpy>=2.5.4",
+    "pandas>=3.0.6",
+    "pyarrow>=26.0.0",
+]
+
+# Cómo convertir el código en un paquete instalable.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.0",
+]
