@@ -32,3 +32,8 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.17.0",
 ]
+
+# Configuración de pytest: dónde buscar los tests y opciones por defecto.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
