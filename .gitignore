@@ -6,6 +6,7 @@ data/
 
 # --- Salidas generadas por el código (se recrean ejecutándolo) ---
 outputs/
+lake/
 
 # --- Modelos entrenados (se regeneran con el pipeline) ---
 *.joblib

@@ -12,6 +12,7 @@ authors = [{ name = "Adrià Tadeo Tormos" }]
 requires-python = ">=3.13"
 # Librerías que el código necesita para FUNCIONAR. Se rellenan con `uv add`.
 dependencies = [
+    "duckdb>=1.5.6",
     "numpy>=2.5.4",
     "pandas>=3.0.6",
     "pyarrow>=26.0.0",
@@ -21,6 +22,7 @@ dependencies = [
 # Comandos de terminal que instala el paquete: `nombre = "modulo:funcion"`.
 [project.scripts]
 verify-data = "credit_risk.verify_data:main"
+ingest-bronze = "credit_risk.ingest:main"
 
 # Cómo convertir el código en un paquete instalable.
 [build-system]
