@@ -1,0 +1,51 @@
+# Integración continua (CI): GitHub ejecuta este flujo en sus servidores
+# cada vez que se sube código, para comprobar que nada se ha roto.
+name: CI
+
+# ¿CUÁNDO se ejecuta?
+on:
+  push:
+    branches: [main]      # al subir commits a main
+  pull_request:           # al abrir o actualizar una pull request
+  workflow_dispatch:      # a mano, con un botón en la pestaña Actions
+
+# ¿QUÉ se ejecuta? Dos trabajos (jobs) independientes que corren en paralelo.
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest            # máquina virtual Linux nueva y vacía
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v5
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Revisar errores con ruff
+        run: uv run --locked ruff check .
+
+      - name: Comprobar el formato con ruff
+        run: uv run --locked ruff format --check .
+
+  test:
+    name: Tests (${{ matrix.os }})
+    # Matriz: el mismo job se ejecuta una vez por cada sistema operativo.
+    strategy:
+      fail-fast: false                # si falla uno, que el otro termine igualmente
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v5
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true          # reutiliza las librerías descargadas entre ejecuciones
+
+      - name: Instalar Python y las dependencias
+        run: uv sync --locked         # --locked: falla si uv.lock no está al día
+
+      - name: Ejecutar los tests
+        run: uv run pytest

@@ -1,5 +1,7 @@
 # Credit Risk Data Platform
 
+[![CI](https://github.com/att-22/credit-risk-data-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/att-22/credit-risk-data-platform/actions/workflows/ci.yml)
+
 Plataforma de datos construida a partir de mi TFM de *scoring* crediticio
 (dataset [Home Credit Default Risk](https://www.kaggle.com/competitions/home-credit-default-risk/data)).
 
