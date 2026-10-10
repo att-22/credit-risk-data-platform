@@ -1,0 +1,15 @@
+# ==========================================================================
+# profiles.yml — a qué base de datos se conecta dbt
+# ==========================================================================
+# Normalmente vive en ~/.dbt/ porque contiene contraseñas. Aquí no hay ninguna
+# (DuckDB es un archivo local), así que lo guardamos en el repo por comodidad.
+# Cuando pasemos a la nube, las credenciales vendrán de variables de entorno.
+
+credit_risk:
+  target: dev            # entorno por defecto
+  outputs:
+    dev:
+      type: duckdb
+      # Base de datos: un único archivo dentro del lago de datos.
+      path: "{{ env_var('LAKE_DIR', '../lake') }}/warehouse.duckdb"
+      threads: 4         # modelos que se pueden construir en paralelo

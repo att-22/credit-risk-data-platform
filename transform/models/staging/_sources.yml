@@ -1,0 +1,26 @@
+version: 2
+
+# Fuentes: los datos que dbt NO crea, sino que lee. Aquí, los Parquet de bronze.
+sources:
+  - name: bronze
+    description: "Copia fiel de los CSV de Home Credit en formato Parquet (ver ingest.py)."
+    config:
+      # dbt-duckdb: cada tabla se lee del Parquet con su nombre ({name}).
+      external_location: "{{ env_var('LAKE_DIR', '../lake') }}/bronze/{name}.parquet"
+    tables:
+      - name: application_train
+        description: "Solicitudes actuales con la variable objetivo TARGET."
+      - name: application_test
+        description: "Solicitudes actuales sin TARGET (para predecir)."
+      - name: bureau
+        description: "Créditos previos del cliente en otras entidades."
+      - name: bureau_balance
+        description: "Estado mensual de los créditos de bureau."
+      - name: previous_application
+        description: "Solicitudes anteriores del cliente en Home Credit."
+      - name: pos_cash_balance
+        description: "Estado mensual de créditos al consumo anteriores."
+      - name: installments_payments
+        description: "Pagos de cuotas de créditos anteriores."
+      - name: credit_card_balance
+        description: "Estado mensual de tarjetas de crédito anteriores."

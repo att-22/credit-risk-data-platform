@@ -12,6 +12,7 @@ authors = [{ name = "Adrià Tadeo Tormos" }]
 requires-python = ">=3.13"
 # Librerías que el código necesita para FUNCIONAR. Se rellenan con `uv add`.
 dependencies = [
+    "dbt-duckdb>=1.11.0",
     "duckdb>=1.5.6",
     "numpy>=2.5.4",
     "pandas>=3.0.6",
