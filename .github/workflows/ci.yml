@@ -9,7 +9,7 @@ on:
   pull_request:           # al abrir o actualizar una pull request
   workflow_dispatch:      # a mano, con un botón en la pestaña Actions
 
-# ¿QUÉ se ejecuta? Dos trabajos (jobs) independientes que corren en paralelo.
+# ¿QUÉ se ejecuta? Varios trabajos (jobs) independientes que corren en paralelo.
 jobs:
   lint:
     name: Lint (ruff)
@@ -49,6 +49,44 @@ jobs:
 
       - name: Ejecutar los tests
         run: uv run pytest
+
+  dbt:
+    name: dbt build (muestra)
+    runs-on: ubuntu-latest
+    # Los datos reales no están en GitHub: el pipeline completo se ejecuta sobre
+    # la muestra de tests/fixtures/muestra (ver scripts/crear_muestra.py).
+    env:
+      DATA_DIR: ${{ github.workspace }}/tests/fixtures/muestra
+      LAKE_DIR: ${{ github.workspace }}/lake
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v5
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Instalar Python y las dependencias
+        run: uv sync --locked
+
+      - name: Verificar los datos de entrada
+        run: uv run verify-data
+
+      - name: Ingesta a la capa bronze
+        run: uv run ingest-bronze
+
+      - name: Instalar los paquetes de dbt
+        working-directory: transform
+        run: uv run dbt deps
+
+      - name: Construir y testear los modelos (staging, intermediate, marts)
+        working-directory: transform
+        run: uv run dbt build
+
+      - name: Comprobar la frescura de las fuentes
+        working-directory: transform
+        run: uv run dbt source freshness
 
   docker:
     name: Docker build
