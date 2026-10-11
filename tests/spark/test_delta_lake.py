@@ -1,26 +1,16 @@
 """Tests del trabajo de Delta Lake (spark_jobs/delta_lake.py) con datos mínimos.
 
-Como los de agregados.py: se saltan sin PySpark o sin Java. Fuera de la imagen de
+La sesión de Spark (con Delta) y los saltos están en conftest.py. Fuera de la imagen de
 Spark (p. ej. en la CI), la sesión descarga los jars de Delta de Maven.
 """
 
-import os
-import shutil
-import sys
 from datetime import date, datetime
-from pathlib import Path
 
 import pytest
+from requisitos_spark import saltar_sin_spark
 
-pytest.importorskip("pyspark")
-pytest.importorskip("delta")
-if not (os.getenv("JAVA_HOME") or shutil.which("java")):
-    pytest.skip("Spark necesita Java", allow_module_level=True)
+saltar_sin_spark()
 
-TRABAJOS = Path(__file__).resolve().parents[2] / "spark_jobs"
-sys.path.insert(0, os.getenv("SPARK_JOBS_DIR", str(TRABAJOS)))
-
-from agregados import sesion  # noqa: E402
 from delta.tables import DeltaTable  # noqa: E402
 from delta_lake import actualizar_agregado, cargar_dia  # noqa: E402
 from pyspark.errors import AnalysisException  # noqa: E402
@@ -31,13 +21,6 @@ ESQUEMA = (
 )
 D1, D2 = date(2026, 9, 1), date(2026, 9, 2)
 T1, T2, T3 = (datetime(2026, 10, 11, h) for h in (10, 11, 12))
-
-
-@pytest.fixture(scope="module")
-def spark():
-    sesion_spark = sesion("tests-delta", particiones=2, delta=True)
-    yield sesion_spark
-    sesion_spark.stop()
 
 
 @pytest.fixture
