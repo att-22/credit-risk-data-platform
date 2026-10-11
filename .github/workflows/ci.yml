@@ -228,6 +228,7 @@ jobs:
     # validación y un despliegue real contra Moto (AWS emulado), comprobando
     # después con boto3 que los recursos son los declarados y que se destruyen.
     env:
+      DATA_DIR: ${{ github.workspace }}/tests/fixtures/muestra  # compose.yaml la exige
       TF: docker compose --profile aws run --rm -T terraform
       VARS: -input=false -no-color -var-file=entornos/local.tfvars
     steps:
