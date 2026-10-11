@@ -20,3 +20,5 @@ models:
   credit_risk:
     staging:
       +materialized: view   # vista: no copia datos, se calcula al consultarla
+    intermediate:
+      +materialized: table  # tabla: las agregaciones son costosas, se calculan una vez

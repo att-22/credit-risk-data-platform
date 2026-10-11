@@ -1,0 +1,51 @@
+version: 2
+
+# Capa intermediate: agregaciones del historial crediticio.
+# El test más importante aquí es `unique` sobre la clave: garantiza que cada
+# modelo tiene la granularidad que dice tener y que ningún JOIN ha duplicado filas.
+
+models:
+  - name: int_bureau_balance__por_credito
+    description: "Resumen del historial mensual de cada crédito del buró: meses observados y proporción de meses con retraso."
+    columns:
+      - name: SK_ID_BUREAU
+        data_tests: [unique, not_null]
+
+  - name: int_bureau__con_balance
+    description: "Créditos del buró con el resumen de su historial mensual."
+    columns:
+      - name: SK_ID_BUREAU
+        data_tests: [unique, not_null]
+
+  - name: int_bureau__por_cliente
+    description: "Historial del buró agregado por cliente (prefijo BURO_)."
+    columns:
+      - name: SK_ID_CURR
+        data_tests: [unique, not_null]
+
+  - name: int_previous_application__por_cliente
+    description: "Solicitudes anteriores agregadas por cliente (prefijo PREV_)."
+    columns:
+      - name: SK_ID_CURR
+        data_tests: [unique, not_null]
+
+  - name: int_installments_payments__con_comportamiento
+    description: "Pagos de cuotas con diferencia, ratio y días de retraso/adelanto."
+
+  - name: int_installments_payments__por_cliente
+    description: "Comportamiento de pago agregado por cliente (prefijo INST_)."
+    columns:
+      - name: SK_ID_CURR
+        data_tests: [unique, not_null]
+
+  - name: int_pos_cash_balance__por_cliente
+    description: "Saldos de créditos al consumo agregados por cliente (prefijo POS_)."
+    columns:
+      - name: SK_ID_CURR
+        data_tests: [unique, not_null]
+
+  - name: int_credit_card_balance__por_cliente
+    description: "Saldos de tarjetas agregados por cliente (prefijo CC_)."
+    columns:
+      - name: SK_ID_CURR
+        data_tests: [unique, not_null]
