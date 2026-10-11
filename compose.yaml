@@ -40,6 +40,8 @@ x-airflow-common: &airflow-common
     KAFKA_BOOTSTRAP: redpanda:9092
     # Almacén del "banco" (lo genera credit_risk_origen; lo leen la API y el productor)
     ORIGEN_RAIZ: /opt/airflow/lake/origen
+    # Base de datos operacional del banco (servicio core-bancario): la usa credit_risk_core
+    CORE_DSN: postgresql://banco:banco@core-bancario:5432/core
   volumes:
     # DAGs: carpeta del repo montada en vivo (los cambios se ven sin reconstruir)
     - ./orchestration/dags:/opt/airflow/dags
@@ -211,8 +213,65 @@ services:
     stop_grace_period: 30s  # tiempo para terminar el lote en curso y confirmar
     restart: always
 
+  # Base de datos operacional SIMULADA del banco ("core bancario"): el estado vivo
+  # de cada solicitud. wal_level=logical activa la replicación lógica que usa el CDC.
+  core-bancario:
+    image: postgres:17
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=4"]
+    environment:
+      POSTGRES_USER: banco
+      POSTGRES_PASSWORD: banco
+      POSTGRES_DB: core
+    volumes:
+      - core-bancario-db:/var/lib/postgresql/data
+      - ./orchestration/core_bancario:/docker-entrypoint-initdb.d:ro  # esquema inicial
+    ports:
+      - "5433:5432"  # 5433 en Windows para no chocar con un Postgres local
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "banco", "-d", "core"]
+      interval: 10s
+      retries: 5
+    restart: always
+
+  # Debezium Server: lee el WAL del core bancario y publica cada cambio
+  # (insert/update/delete) en Redpanda, en el topic cdc.core.solicitudes.
+  debezium:
+    image: quay.io/debezium/server:3.7.0.Final
+    volumes:
+      - ./orchestration/debezium:/debezium/config:ro
+      - debezium-data:/debezium/data  # posición en el WAL: sobrevive a reinicios
+    depends_on:
+      core-bancario:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    restart: always
+
+  # Consumidor de CDC: servicio permanente que escribe los cambios del core
+  # bancario (topic cdc.core.solicitudes) en /opt/airflow/lake/cdc/bronze.
+  consumidor-cdc:
+    image: credit-risk-airflow:local
+    entrypoint: /opt/credit-risk/.venv/bin/consume-cdc
+    command: ["--bronze", "/opt/airflow/lake/cdc/bronze"]
+    environment:
+      KAFKA_BOOTSTRAP: redpanda:9092
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - lake:/opt/airflow/lake
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      debezium:
+        condition: service_started
+      api-origen:  # garantiza que la imagen ya está construida
+        condition: service_started
+    stop_grace_period: 30s
+    restart: always
+
 volumes:
   postgres-db:
   airflow-logs:
   lake:
   redpanda-data:
+  core-bancario-db:
+  debezium-data:

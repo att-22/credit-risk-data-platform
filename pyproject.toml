@@ -19,6 +19,7 @@ dependencies = [
     "httpx>=0.28.1",
     "numpy>=2.5.4",
     "pandas>=3.0.6",
+    "psycopg[binary]>=3.3.6",
     "pyarrow>=26.0.0",
     "python-dotenv>=1.2.4",
     "uvicorn[standard]>=0.54.0",
@@ -32,6 +33,8 @@ simulate-source = "credit_risk.simulate_source:main"
 extract-api = "credit_risk.extract_api:main"
 produce-events = "credit_risk.productor:main"
 consume-events = "credit_risk.consumidor:main"
+simulate-core = "credit_risk.simulate_core:main"
+consume-cdc = "credit_risk.cdc:main"
 
 # Cómo convertir el código en un paquete instalable.
 [build-system]

@@ -1,0 +1,79 @@
+version: 2
+
+# Capa CDC: cambios del core bancario capturados por Debezium (ver src/credit_risk/cdc.py).
+# Toda la carpeta está desactivada salvo con --vars '{con_cdc: true}' (dbt_project.yml):
+# la CI de dbt no tiene datos de CDC; se construye en el job de CDC de la CI.
+
+sources:
+  - name: cdc
+    description: "Registro de cambios (insert/update/delete) de core.solicitudes en Postgres."
+    config:
+      enabled: "{{ var('con_cdc', false) }}"
+      external_location: >-
+        read_parquet('{{ env_var('LAKE_DIR', '../lake') }}/bronze/{name}/*/*.parquet',
+        hive_partitioning = true)
+    tables:
+      - name: cdc_solicitudes
+        description: "Un evento por cambio: op (c/u/d/r), la fila (la anterior en los delete) y su LSN."
+
+models:
+  - name: stg_core__solicitudes_cambios
+    description: >
+      Cambios sin duplicados (el consumo es at-least-once): uno por (solicitud, LSN, operación).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [sk_id_curr, lsn, op]
+    columns:
+      - name: op
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['c', 'u', 'd', 'r']
+
+  - name: int_core__solicitudes_historial
+    description: >
+      Historial de versiones de cada solicitud (SCD tipo 2): una fila por estado por el que
+      pasó, con su intervalo de validez [valido_desde, valido_hasta). La versión vigente
+      tiene valido_hasta = NULL; si la solicitud se borró, su última versión se cierra
+      con la hora del borrado.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [sk_id_curr, lsn]
+    columns:
+      - name: estado
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['recibida', 'en_revision', 'aprobada', 'rechazada']
+
+  - name: core_solicitudes_actual
+    description: "Estado actual de cada solicitud no borrada: la réplica de core.solicitudes."
+    columns:
+      - name: sk_id_curr
+        data_tests: [unique, not_null]
+
+unit_tests:
+  - name: test_historial_scd2_con_borrado
+    description: >
+      Una solicitud que pasa por tres estados y otra que se crea y se borra: la primera
+      deja tres versiones (la última vigente) y la segunda una versión cerrada por el borrado.
+    model: int_core__solicitudes_historial
+    overrides:
+      vars:
+        con_cdc: true
+    given:
+      - input: ref('stg_core__solicitudes_cambios')
+        rows:
+          - {sk_id_curr: 1, op: c, estado: recibida, lsn: 10, actualizado_en: "2026-09-07 10:00:00+00", capturado_en: "2026-09-07 10:00:01+00"}
+          - {sk_id_curr: 1, op: u, estado: en_revision, lsn: 20, actualizado_en: "2026-09-07 11:00:00+00", capturado_en: "2026-09-07 11:00:01+00"}
+          - {sk_id_curr: 1, op: u, estado: aprobada, lsn: 30, actualizado_en: "2026-09-07 12:00:00+00", capturado_en: "2026-09-07 12:00:01+00"}
+          - {sk_id_curr: 2, op: c, estado: recibida, lsn: 15, actualizado_en: "2026-09-07 10:30:00+00", capturado_en: "2026-09-07 10:30:01+00"}
+          - {sk_id_curr: 2, op: d, estado: recibida, lsn: 25, actualizado_en: "2026-09-07 10:30:00+00", capturado_en: "2026-09-07 11:30:00+00"}
+    expect:
+      rows:
+        - {sk_id_curr: 1, estado: recibida, valido_desde: "2026-09-07 10:00:00+00", valido_hasta: "2026-09-07 11:00:00+00", es_actual: false, cerrada_por_borrado: false}
+        - {sk_id_curr: 1, estado: en_revision, valido_desde: "2026-09-07 11:00:00+00", valido_hasta: "2026-09-07 12:00:00+00", es_actual: false, cerrada_por_borrado: false}
+        - {sk_id_curr: 1, estado: aprobada, valido_desde: "2026-09-07 12:00:00+00", valido_hasta: null, es_actual: true, cerrada_por_borrado: false}
+        - {sk_id_curr: 2, estado: recibida, valido_desde: "2026-09-07 10:30:00+00", valido_hasta: "2026-09-07 11:30:00+00", es_actual: false, cerrada_por_borrado: true}

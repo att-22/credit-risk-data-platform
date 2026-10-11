@@ -45,6 +45,11 @@ KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "localhost:19092")
 TOPIC_SOLICITUDES = os.getenv("TOPIC_SOLICITUDES", "solicitudes")
 TOPIC_DLQ = os.getenv("TOPIC_DLQ", "solicitudes.dlq")  # dead letter queue: eventos inválidos
 
+# CDC (Fase 3.7): base de datos operacional del banco ("core bancario") y el topic
+# donde Debezium publica sus cambios (<prefijo>.<esquema>.<tabla>).
+CORE_DSN = os.getenv("CORE_DSN", "postgresql://banco:banco@localhost:5433/core")
+TOPIC_CDC = os.getenv("TOPIC_CDC", "cdc.core.solicitudes")
+
 # Salidas generadas por este proyecto (por defecto, ./outputs del repositorio).
 # También configurable: instalado como paquete (p. ej. en Docker), ROOT ya no
 # apunta al repositorio y hay que indicar la carpeta desde fuera.

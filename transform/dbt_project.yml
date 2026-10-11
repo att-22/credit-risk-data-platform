@@ -24,6 +24,12 @@ models:
       +materialized: table  # tabla: las agregaciones son costosas, se calculan una vez
     marts:
       +materialized: table  # tabla: es lo que consultan los usuarios y el modelo de ML
+    cdc:
+      # Cambios del core bancario (Fase 3.7). Solo con --vars '{con_cdc: true}':
+      # sin datos de CDC, la fuente no tendría ficheros que leer.
+      +enabled: "{{ var('con_cdc', false) }}"
+      +materialized: table
+      +tags: [cdc]
 
 # Variables del proyecto: se leen en los modelos con var() y se pueden cambiar
 # al ejecutar, p. ej. dbt build --vars '{tope_ingresos: 1000000}'

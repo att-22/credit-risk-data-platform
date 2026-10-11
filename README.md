@@ -11,7 +11,7 @@ orquestado y desplegable.
 
 **Stack:** Python 3.13 · uv · DuckDB · Parquet · dbt (dbt-duckdb, dbt_utils,
 dbt_expectations) · Apache Airflow 3 · astronomer-cosmos · FastAPI · httpx ·
-Redpanda (Kafka) · confluent-kafka · pytest · ruff · pre-commit · GitHub Actions ·
+Redpanda (Kafka) · confluent-kafka · PostgreSQL · Debezium · pytest · ruff · pre-commit · GitHub Actions ·
 Docker / Docker Compose
 
 ## Estado
@@ -217,6 +217,36 @@ flowchart LR
   escribir y pierde eventos) y republicación.
 - Consola web de Redpanda (topics, mensajes, grupos): http://localhost:8082.
 
+## CDC: captura de cambios de la base de datos del banco
+
+La aplicación del banco guarda el estado vivo de cada solicitud en Postgres
+(`core.solicitudes`) y lo va cambiando (recibida → en revisión → aprobada o
+rechazada; algunas se borran). **Debezium** lee el WAL de Postgres por
+replicación lógica y publica cada `INSERT`, `UPDATE` y `DELETE` en Redpanda, sin
+cargar la base de datos con consultas y sin perder cambios intermedios.
+
+```mermaid
+flowchart LR
+    pg[("Postgres<br/>core.solicitudes")] -- "WAL (pgoutput)" --> dbz["Debezium Server"]
+    dbz --> t[["topic cdc.core.solicitudes<br/>op, before, after, LSN"]]
+    t --> c["consume-cdc<br/>(servicio consumidor-cdc)"]
+    c --> b[("bronze/cdc_solicitudes/<br/>registro de cambios")]
+    b --> dbt["dbt (tag cdc)"]
+    dbt --> h["historial SCD2<br/>(versiones con validez)"]
+    dbt --> a["estado actual<br/>(réplica de la tabla)"]
+```
+
+- Bronze guarda el **registro completo de cambios**, no solo el estado final; el
+  **LSN** (posición en el WAL) los ordena y sirve para deduplicar (el consumo es
+  *at-least-once*, con el mismo bucle que el streaming).
+- dbt construye el **historial SCD tipo 2** (cada versión con su intervalo de
+  validez, para consultas "¿en qué estado estaba el día D?") y la **réplica** del
+  estado actual. Los modelos se activan con `--vars '{con_cdc: true}'`.
+- [`comprobar_replica_cdc.py`](scripts/comprobar_replica_cdc.py) compara la
+  réplica con la tabla real de Postgres y verifica que cada solicitud tenga todas
+  sus versiones: perder *inserts* no cambia el estado final, pero sí el historial.
+  Se ejecuta en la CI con Postgres, Debezium y Redpanda reales.
+
 ## Hallazgos sobre los datos
 
 - **Centinela 365243** (= 1000 años) significa "sin dato" en 6 columnas
@@ -267,7 +297,7 @@ en `<DATA_DIR>/raw/`, define `DATA_DIR` en `.env` y ejecuta los mismos comandos
 ### Airflow
 
 ```bash
-docker compose up -d --build    # Postgres, Airflow, API del origen, Redpanda y su consumidor
+docker compose up -d --build    # Airflow, API del origen, Redpanda, core bancario, Debezium y consumidores
 ```
 
 Abre http://localhost:8080 (sin usuario: configuración solo para uso local),
@@ -321,6 +351,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 - **Tests:** pytest en Ubuntu y Windows.
 - **dbt build (muestra):** el pipeline completo `verify-data → simulate-source → ingest-bronze → dbt build → dbt source freshness` sobre la muestra sintética, y la paridad entre la carga incremental y la reconstrucción completa.
 - **Streaming (Redpanda):** arranca un broker y ejecuta los tests de integración del productor y el consumidor.
+- **CDC (Postgres + Debezium):** levanta Postgres, Debezium y Redpanda, captura un día de cambios y comprueba que la réplica de dbt es idéntica a Postgres.
 - **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.
 
