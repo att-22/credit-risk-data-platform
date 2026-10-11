@@ -27,6 +27,10 @@ RAW_DIR = DATA_DIR / "raw"
 LAKE_DIR = Path(os.getenv("LAKE_DIR", ROOT / "lake"))
 BRONZE_DIR = LAKE_DIR / "bronze"
 
+# Landing zone: donde el sistema origen (simulado) deja los ficheros de cada día,
+# antes de que la ingesta los lleve a bronze. Ver simulate_source.py.
+LANDING_DIR = Path(os.getenv("LANDING_DIR", LAKE_DIR / "landing"))
+
 # Salidas generadas por este proyecto (por defecto, ./outputs del repositorio).
 # También configurable: instalado como paquete (p. ej. en Docker), ROOT ya no
 # apunta al repositorio y hay que indicar la carpeta desde fuera.

@@ -24,6 +24,7 @@ dependencies = [
 [project.scripts]
 verify-data = "credit_risk.verify_data:main"
 ingest-bronze = "credit_risk.ingest:main"
+simulate-source = "credit_risk.simulate_source:main"
 
 # Cómo convertir el código en un paquete instalable.
 [build-system]
