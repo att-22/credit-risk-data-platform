@@ -57,7 +57,13 @@ def test_los_dags_se_importan_sin_errores(dagbag):
 def test_la_ingesta_publica_bronze_al_final(ingesta):
     publicar = ingesta.get_task("publicar_bronze")
     assert BRONZE in publicar.outlets
-    assert {"verify_data", "ingest_bronze"} <= publicar.get_flat_relative_ids(upstream=True)
+    assert {"verify_data", "simulate_source", "ingest_bronze"} <= publicar.get_flat_relative_ids(
+        upstream=True
+    )
+
+
+def test_la_ingesta_simula_el_origen_antes_de_ingerir(ingesta):
+    assert ingesta.get_task("simulate_source").downstream_task_ids == {"ingest_bronze"}
 
 
 def test_la_transformacion_se_programa_con_bronze(transformacion):

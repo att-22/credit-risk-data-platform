@@ -3,10 +3,14 @@ version: 2
 # Fuentes: los datos que dbt NO crea, sino que lee. Aquí, los Parquet de bronze.
 sources:
   - name: bronze
-    description: "Copia fiel de los CSV de Home Credit en formato Parquet (ver ingest.py)."
+    description: "Copia fiel de las entregas diarias de Home Credit en Parquet (ver ingest.py)."
     config:
-      # dbt-duckdb: cada tabla se lee del Parquet con su nombre ({name}).
-      external_location: "{{ env_var('LAKE_DIR', '../lake') }}/bronze/{name}.parquet"
+      # dbt-duckdb: cada tabla ({name}) se lee de todas sus particiones diarias,
+      # bronze/<tabla>/fecha_entrega=AAAA-MM-DD/data.parquet. hive_partitioning
+      # convierte la carpeta en la columna fecha_entrega (DATE).
+      external_location: >-
+        read_parquet('{{ env_var('LAKE_DIR', '../lake') }}/bronze/{name}/*/*.parquet',
+        hive_partitioning = true)
       # Frescura: `dbt source freshness` mira el valor máximo de esta columna
       # (la escribe ingest.py) y avisa si la última ingesta es demasiado antigua.
       loaded_at_field: _INGESTED_AT
