@@ -11,16 +11,20 @@ proyecto (pyproject.toml solo recoge la carpeta tests/).
 """
 
 import json
+import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from airflow.dag_processing.dagbag import DagBag
-from comun import BRONZE, MART
+from comun import BRONZE, FICHEROS_ENTREGA, MART
 
 DAGS_DIR = Path("/opt/airflow/dags")
 MANIFEST = Path("/opt/credit-risk/transform/target/manifest.json")
+ORIGEN = "credit_risk_origen"
 INGESTA = "credit_risk_ingesta"
 TRANSFORMACION = "credit_risk_transformacion"
+TODOS = [ORIGEN, INGESTA, TRANSFORMACION]
 
 
 @pytest.fixture(scope="module")
@@ -47,8 +51,8 @@ def tareas_duckdb(transformacion):
 
 def test_los_dags_se_importan_sin_errores(dagbag):
     assert dagbag.import_errors == {}
-    # comun.py está en .airflowignore: solo hay los dos DAGs
-    assert set(dagbag.dag_ids) == {INGESTA, TRANSFORMACION}
+    # comun.py está en .airflowignore: solo hay los tres DAGs
+    assert set(dagbag.dag_ids) == set(TODOS)
 
 
 # --- Assets: la conexión entre los dos DAGs -----------------------------------
@@ -57,13 +61,45 @@ def test_los_dags_se_importan_sin_errores(dagbag):
 def test_la_ingesta_publica_bronze_al_final(ingesta):
     publicar = ingesta.get_task("publicar_bronze")
     assert BRONZE in publicar.outlets
-    assert {"verify_data", "simulate_source", "ingest_bronze"} <= publicar.get_flat_relative_ids(
-        upstream=True
-    )
+    assert {"esperar_entrega", "ingest_bronze"} <= publicar.get_flat_relative_ids(upstream=True)
 
 
-def test_la_ingesta_simula_el_origen_antes_de_ingerir(ingesta):
-    assert ingesta.get_task("simulate_source").downstream_task_ids == {"ingest_bronze"}
+# --- Ingesta diaria -----------------------------------------------------------
+
+
+def test_la_ingesta_es_diaria_en_el_periodo_simulado(ingesta):
+    assert ingesta.catchup is True
+    assert ingesta.start_date == datetime(2026, 9, 1, tzinfo=UTC)
+    assert ingesta.end_date == datetime(2026, 9, 30, tzinfo=UTC)
+    assert ingesta.timetable.expression == "0 0 * * *"  # "@daily" en formato cron
+
+
+def test_la_ingesta_espera_la_entrega_e_ingiere_su_dia(ingesta):
+    sensor = ingesta.get_task("esperar_entrega")
+    assert sensor.mode == "reschedule"  # no ocupa un hueco mientras espera
+    assert sensor.downstream_task_ids == {"ingest_bronze"}
+    assert "--fecha {{ ds }}" in ingesta.get_task("ingest_bronze").bash_command
+
+
+def test_los_ficheros_esperados_coinciden_con_el_proyecto():
+    # comun.py no puede importar credit_risk (otro entorno virtual): se pregunta
+    # al Python del proyecto y se compara con la lista de los DAGs.
+    salida = subprocess.run(
+        [
+            "/opt/credit-risk/.venv/bin/python",
+            "-c",
+            "from credit_risk.config import TABLES; print(','.join(TABLES.values()))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert FICHEROS_ENTREGA == [f + ".gz" for f in salida.split(",")]
+
+
+def test_el_origen_simula_las_entregas(dagbag):
+    origen = dagbag.dags[ORIGEN]
+    assert origen.get_task("verify_data").downstream_task_ids == {"simulate_source"}
 
 
 def test_la_transformacion_se_programa_con_bronze(transformacion):
@@ -107,21 +143,27 @@ def test_la_transformacion_no_reconstruye_por_defecto(transformacion):
     assert mart.full_refresh == "{{ params.reconstruir }}"
 
 
+def test_toda_la_transformacion_lee_bronze_hasta_el_mismo_corte(tareas_duckdb):
+    # Si no, la ingesta escribiendo a la vez hace que cada tarea vea datos distintos
+    dbt = [t for t in tareas_duckdb if t.task_id.startswith("dbt.")]
+    assert {t.vars["corte_ingesta"] for t in dbt} == {"{{ dag_run.start_date }}"}
+
+
 # --- Comunes a los dos DAGs -----------------------------------------------------
 
 
-@pytest.mark.parametrize("dag_id", [INGESTA, TRANSFORMACION])
+@pytest.mark.parametrize("dag_id", TODOS)
 def test_todas_las_tareas_tienen_reintentos(dagbag, dag_id):
     assert all(t.retries >= 1 for t in dagbag.dags[dag_id].tasks)
 
 
-@pytest.mark.parametrize("dag_id", [INGESTA, TRANSFORMACION])
+@pytest.mark.parametrize("dag_id", TODOS)
 def test_una_sola_ejecucion_activa(dagbag, dag_id):
     # Dos ejecuciones a la vez escribirían en el mismo lago
     assert dagbag.dags[dag_id].max_active_runs == 1
 
 
-@pytest.mark.parametrize("dag_id", [INGESTA, TRANSFORMACION])
+@pytest.mark.parametrize("dag_id", TODOS)
 def test_parametro_datos_por_defecto_es_la_muestra(dagbag, dag_id):
     param = dagbag.dags[dag_id].params.get_param("datos")
     assert param.value == "muestra"

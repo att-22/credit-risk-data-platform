@@ -1,40 +1,53 @@
-"""Ingesta: CSV de Home Credit -> landing zone -> capa bronze (Parquet particionado).
+"""Ingesta diaria: la entrega de cada día en la landing zone -> bronze.
 
-    verify_data -> simulate_source -> ingest_bronze -> publicar_bronze
-        ==>  Asset home_credit_bronze
+    esperar_entrega -> ingest_bronze -> publicar_bronze  ==>  Asset home_credit_bronze
 
-`simulate_source` hace de sistema origen: reparte los CSV en entregas diarias en
-la landing zone. `ingest_bronze` ingiere solo las entregas que aún no estén en
-bronze (tabla de control).
+Cada ejecución procesa SU día: el de su fecha lógica (`{{ ds }}`). La ejecución
+del 2026-09-05 ingiere landing/fecha=2026-09-05 con `ingest-bronze --fecha`, y
+volver a ejecutarla (Clear) reingiere exactamente ese día (idempotente).
 
-Al terminar, `publicar_bronze` registra un evento en el Asset
-`home_credit_bronze` con el conjunto de datos procesado (`datos`) en sus
-metadatos. Ese evento es el que dispara el DAG `credit_risk_transformacion`:
-este DAG no necesita saber que existe el otro, solo que ha actualizado bronze.
+- `esperar_entrega` es un sensor: comprueba cada 30 s si la entrega del día
+  está completa (los 8 ficheros) y, entretanto, libera su hueco de ejecución
+  (mode="reschedule"). Si en 1 hora no llega, falla: alguien debe enterarse.
+- catchup=True: al activar el DAG, Airflow crea una ejecución por cada día del
+  periodo (start_date -> end_date) que aún no se haya ejecutado. Para reprocesar
+  un rango de días ya ejecutados se usa un backfill.
+- Al terminar, publica el Asset de bronze (con el día y el conjunto de datos en
+  sus metadatos), que dispara la transformación.
 
-Parámetro `datos`: "muestra" (la sintética de la imagen) o "completo" (los CSV
-de Kaggle montados en /data). Las ejecuciones programadas usan la muestra.
+Parámetro `datos`: "muestra" o "completo". Las ejecuciones programadas usan la
+muestra; para los datos completos, lanzar un backfill con datos=completo.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.sdk import Param, dag, task
-from comun import BIN, BRONZE, DATOS_VALIDOS, entorno
+from comun import (
+    BIN,
+    BRONZE,
+    DATOS_VALIDOS,
+    FICHEROS_ENTREGA,
+    PRIMERA_ENTREGA,
+    ULTIMA_ENTREGA,
+    entorno,
+    landing,
+)
 
 ENTORNO = entorno("params.datos")
 
 
 @dag(
     dag_id="credit_risk_ingesta",
-    description="CSV -> bronze; publica el Asset home_credit_bronze",
+    description="Ingesta diaria de la entrega del día a bronze",
     doc_md=__doc__,
-    schedule="0 6 * * *",  # todos los días a las 06:00 UTC
-    start_date=datetime(2026, 10, 1),
-    catchup=False,  # no recuperar los días pasados desde start_date
-    max_active_runs=1,  # una ejecución a la vez: dos escribiendo en el mismo lago chocarían
+    schedule="@daily",  # una ejecución por día, a las 00:00 UTC
+    start_date=PRIMERA_ENTREGA,
+    end_date=ULTIMA_ENTREGA,  # el periodo simulado; en producción no tendría fin
+    catchup=True,  # ejecutar también los días del periodo que ya han pasado
+    max_active_runs=1,  # un día detrás de otro: todos escriben la tabla de control
     params={
         "datos": Param(
             "muestra",
@@ -46,33 +59,28 @@ ENTORNO = entorno("params.datos")
     tags=["credit-risk", "ingesta"],
 )
 def credit_risk_ingesta():
-    verify_data = BashOperator(
-        task_id="verify_data",
-        bash_command=f"{BIN}/verify-data",
+    @task.sensor(poke_interval=30, timeout=timedelta(hours=1), mode="reschedule")
+    def esperar_entrega(ds=None, params=None) -> bool:
+        """¿Ha dejado el origen los 8 ficheros de la entrega de este día?"""
+        entrega = landing(params["datos"]) / f"fecha={ds}"
+        faltan = [f for f in FICHEROS_ENTREGA if not (entrega / f).exists()]
+        if faltan:
+            print(f"Entrega {entrega} incompleta, faltan: {faltan}")
+        return not faltan
+
+    ingest_bronze = BashOperator(
+        task_id="ingest_bronze",
+        bash_command=f"{BIN}/ingest-bronze --fecha {{{{ ds }}}}",
         env=ENTORNO,
         append_env=True,  # además de ENTORNO, conservar el entorno del contenedor
     )
 
-    simulate_source = BashOperator(
-        task_id="simulate_source",
-        bash_command=f"{BIN}/simulate-source",
-        env=ENTORNO,
-        append_env=True,
-    )
-
-    ingest_bronze = BashOperator(
-        task_id="ingest_bronze",
-        bash_command=f"{BIN}/ingest-bronze",
-        env=ENTORNO,
-        append_env=True,
-    )
-
     @task(outlets=[BRONZE])
-    def publicar_bronze(params=None, outlet_events=None):
-        """Registra el evento del Asset con el conjunto de datos en sus metadatos."""
-        outlet_events[BRONZE].extra = {"datos": params["datos"]}
+    def publicar_bronze(ds=None, params=None, outlet_events=None):
+        """Registra el evento del Asset con el día y el conjunto de datos."""
+        outlet_events[BRONZE].extra = {"datos": params["datos"], "fecha_entrega": ds}
 
-    verify_data >> simulate_source >> ingest_bronze >> publicar_bronze()
+    esperar_entrega() >> ingest_bronze >> publicar_bronze()
 
 
 credit_risk_ingesta()

@@ -121,15 +121,22 @@ idéntico al de una reconstrucción completa (`--full-refresh`); se ejecuta en l
 
 ## Orquestación con Airflow
 
-El pipeline se orquesta con **Apache Airflow 3** en Docker Compose. Son dos DAGs
-conectados por **Assets**: la transformación no se programa por horario, sino
-cuando la ingesta publica datos nuevos en bronze.
+El pipeline se orquesta con **Apache Airflow 3** en Docker Compose. Un DAG
+simula el sistema origen; la ingesta es **diaria** (cada ejecución procesa la
+entrega de su fecha lógica) y está conectada con la transformación por
+**Assets**: la transformación no se programa por horario, sino cuando la
+ingesta publica datos nuevos en bronze.
 
 ```mermaid
 flowchart LR
-    subgraph ing["DAG credit_risk_ingesta · diario 06:00 UTC"]
-        v[verify_data] --> i[ingest_bronze] --> pb[publicar_bronze]
+    subgraph org["DAG credit_risk_origen · manual"]
+        v[verify_data] --> s[simulate_source]
     end
+    landing[("Landing zone<br/>fecha=AAAA-MM-DD")]
+    subgraph ing["DAG credit_risk_ingesta · @daily, catchup"]
+        e["esperar_entrega<br/>(sensor)"] --> i["ingest_bronze<br/>--fecha {{ ds }}"] --> pb[publicar_bronze]
+    end
+    s --> landing -.-> e
     bronze[("Asset<br/>home_credit_bronze")]
     subgraph tr["DAG credit_risk_transformacion · schedule = Asset bronze"]
         r[resolver_datos] --> f[dbt_source_freshness] --> d["dbt<br/>(Cosmos: 1 tarea por modelo)"] --> pm[publicar_mart]
@@ -140,6 +147,12 @@ flowchart LR
     pm --> mart
 ```
 
+- **Ingesta por fecha lógica:** la ejecución del día X ingiere la entrega del
+  día X (`{{ ds }}`), así que relanzar una ejecución (*Clear*) o hacer un
+  *backfill* de un rango reprocesa exactamente esos días. Con `catchup=True`, al
+  activar el DAG se crea una ejecución por cada día del periodo simulado.
+- **Sensor:** `esperar_entrega` comprueba cada 30 s que la entrega del día esté
+  completa y, mientras espera, libera su hueco (`mode="reschedule"`).
 - **Assets con metadatos:** el evento de bronze lleva qué conjunto se ingirió
   (`muestra` o `completo`); la transformación lo lee y procesa ese mismo conjunto.
   Cada conjunto tiene su propio lago, así una prueba nunca pisa los datos completos.
@@ -209,9 +222,11 @@ docker compose up -d --build    # Postgres + Airflow (api-server, scheduler, dag
 ```
 
 Abre http://localhost:8080 (sin usuario: configuración solo para uso local),
-activa los DAGs `credit_risk_ingesta` y `credit_risk_transformacion`, y lanza la
-ingesta con **Trigger** eligiendo `datos = muestra` o `completo`. La
-transformación arranca sola al terminar la ingesta. Para pararlo:
+lanza `credit_risk_origen` (genera las entregas en la *landing zone*) y activa
+`credit_risk_transformacion` y `credit_risk_ingesta`: la ingesta procesa los 30
+días uno a uno y cada día dispara la transformación. Por defecto se usa la
+muestra; para los datos completos, lanza el origen con `datos = completo` y un
+*backfill* de la ingesta con el mismo parámetro. Para pararlo:
 `docker compose down` (los volúmenes con el lago y el historial se conservan).
 
 Compose lee `DATA_DIR` del archivo `.env`; con `datos = muestra` no hacen falta

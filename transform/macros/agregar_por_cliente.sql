@@ -78,7 +78,7 @@
     -- Incremental: clientes con alguna fila ingerida después de la última ejecución
     where {{ clave }} in (
         select {{ clave }} from {{ relacion }}
-        where _INGESTED_AT > (select max(_INGESTED_AT) from {{ this }})
+        where _INGESTED_AT > (select {{ marca_de_agua() }})
     )
     {%- endif %}
     group by {{ clave }}

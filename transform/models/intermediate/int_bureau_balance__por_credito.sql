@@ -22,7 +22,7 @@ from balance
 {% if is_incremental() %}
 where SK_ID_BUREAU in (
     select SK_ID_BUREAU from balance
-    where _INGESTED_AT > (select max(_INGESTED_AT) from {{ this }})
+    where _INGESTED_AT > (select {{ marca_de_agua() }})
 )
 {% endif %}
 group by SK_ID_BUREAU

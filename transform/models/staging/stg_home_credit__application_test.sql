@@ -3,7 +3,7 @@
 
 with origen as (
 
-    select * from {{ source('bronze', 'application_test') }}
+    select * from {{ bronze_hasta_corte('application_test') }}
 
 ),
 
