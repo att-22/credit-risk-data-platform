@@ -22,3 +22,10 @@ models:
       +materialized: view   # vista: no copia datos, se calcula al consultarla
     intermediate:
       +materialized: table  # tabla: las agregaciones son costosas, se calculan una vez
+    marts:
+      +materialized: table  # tabla: es lo que consultan los usuarios y el modelo de ML
+
+# Variables del proyecto: se leen en los modelos con var() y se pueden cambiar
+# al ejecutar, p. ej. dbt build --vars '{percentil_recorte_ingresos: 0.99}'
+vars:
+  percentil_recorte_ingresos: 0.999  # tope de AMT_INCOME_TOTAL (igual que el TFM)

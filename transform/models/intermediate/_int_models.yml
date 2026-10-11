@@ -5,6 +5,12 @@ version: 2
 # modelo tiene la granularidad que dice tener y que ningún JOIN ha duplicado filas.
 
 models:
+  - name: int_application__con_ratios
+    description: "Solicitudes de train y test (columna CONJUNTO) con ingresos recortados al percentil 99,9 de train y ratios financieros."
+    columns:
+      - name: SK_ID_CURR
+        data_tests: [unique, not_null]
+
   - name: int_bureau_balance__por_credito
     description: "Resumen del historial mensual de cada crédito del buró: meses observados y proporción de meses con retraso."
     columns:
