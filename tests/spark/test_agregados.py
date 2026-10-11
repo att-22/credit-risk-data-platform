@@ -1,42 +1,21 @@
 """Tests de los trabajos de Spark (spark_jobs/agregados.py) con datos mínimos.
 
-Necesitan PySpark y Java: se saltan si no están (p. ej. el job de tests normal
-de la CI o un Windows sin Java). Se ejecutan en el job "Spark" de la CI y, en
-local, dentro del contenedor de Spark:
+La sesión de Spark y las condiciones para saltarlos están en conftest.py. En
+local se ejecutan dentro del contenedor de Spark:
 
     docker compose run --rm spark python3 -m pytest /opt/spark-tests
 """
 
-import os
-import shutil
-import sys
-from pathlib import Path
-
 import pytest
+from requisitos_spark import saltar_sin_spark
 
-pytest.importorskip("pyspark")
-if not (os.getenv("JAVA_HOME") or shutil.which("java")):
-    pytest.skip("Spark necesita Java", allow_module_level=True)
-
-# Los trabajos de Spark no son parte del paquete credit_risk: se importan por ruta
-# (en el repositorio, spark_jobs/; en el contenedor de Spark, donde se monten)
-TRABAJOS = Path(__file__).resolve().parents[2] / "spark_jobs"
-sys.path.insert(0, os.getenv("SPARK_JOBS_DIR", str(TRABAJOS)))
+saltar_sin_spark()
 
 from agregados import (  # noqa: E402
     agregar_por_cliente,
     bureau_balance_por_credito,
     con_comportamiento,
-    sesion,
 )
-
-
-@pytest.fixture(scope="module")
-def spark():
-    # Arrancar Spark cuesta segundos: una sola sesión para todos los tests del módulo
-    sesion_spark = sesion("tests", particiones=2)
-    yield sesion_spark
-    sesion_spark.stop()
 
 
 def test_resume_el_historial_de_cada_credito(spark):

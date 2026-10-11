@@ -176,8 +176,9 @@ jobs:
   spark:
     name: Spark
     runs-on: ubuntu-latest
-    # Tests de los trabajos de PySpark y paridad con dbt sobre la muestra. Spark
-    # necesita Java: se instala la 17 (la misma que la imagen de Spark).
+    # Tests de los trabajos de PySpark y Delta Lake y paridad con dbt sobre la
+    # muestra. Spark necesita Java: se instala la 17 (la misma que la imagen de
+    # Spark). Los jars de Delta se descargan de Maven al crear la sesión.
     env:
       DATA_DIR: ${{ github.workspace }}/tests/fixtures/muestra
       LAKE_DIR: ${{ github.workspace }}/lake
@@ -210,10 +211,12 @@ jobs:
           uv run dbt deps
           uv run dbt build --select +int_bureau_balance__por_credito +int_installments_payments__por_cliente --indirect-selection cautious
 
-      - name: Ejecutar el trabajo de Spark y comparar con dbt
+      - name: Ejecutar los trabajos de Spark (Parquet y Delta) y comparar con dbt
         run: |
           uv run python spark_jobs/agregados.py --lake lake
-          uv run python scripts/comprobar_paridad_spark.py
+          uv run python spark_jobs/delta_lake.py cargar --lake lake
+          uv run python spark_jobs/delta_lake.py historia --lake lake
+          uv run python scripts/comprobar_paridad_spark.py --delta
 
   airflow:
     name: Airflow DAGs

@@ -11,7 +11,7 @@ orquestado y desplegable.
 
 **Stack:** Python 3.13 · uv · DuckDB · Parquet · dbt (dbt-duckdb, dbt_utils,
 dbt_expectations) · Apache Airflow 3 · astronomer-cosmos · FastAPI · httpx ·
-Redpanda (Kafka) · confluent-kafka · PostgreSQL · Debezium · Apache Spark (PySpark) · pytest · ruff · pre-commit · GitHub Actions ·
+Redpanda (Kafka) · confluent-kafka · PostgreSQL · Debezium · Apache Spark (PySpark) · Delta Lake · pytest · ruff · pre-commit · GitHub Actions ·
 Docker / Docker Compose
 
 ## Estado
@@ -264,6 +264,27 @@ Con estos datos (~530 MB) DuckDB es unas 5 veces más rápido: Spark paga un cos
 fijo (JVM, planificación de tareas, *shuffle*) que solo compensa cuando los datos
 no caben en una máquina y hay que repartir el trabajo entre varias.
 
+### Delta Lake
+
+[`spark_jobs/delta_lake.py`](spark_jobs/delta_lake.py) lleva bronze y el agregado
+por crédito a **tablas Delta**: Parquet más un registro de transacciones
+(`_delta_log/`) que añade garantías de base de datos:
+
+- **ACID**: cada escritura es un *commit* atómico; nunca se lee una tabla a medias.
+- **`MERGE`** (*upsert*): el agregado se actualiza de forma incremental solo con los
+  créditos que tienen datos nuevos; una entrega tardía **actualiza** sus créditos
+  (25.390 en la prueba con el día 15) en lugar de duplicarlos.
+- ***Time travel***: cada *commit* es una versión que se puede volver a leer
+  (`versionAsOf`): el "corte de lectura" de la Fase 3, de forma nativa.
+- **Contrato de esquema**: escribir una columna que la tabla no tiene es un error.
+- **`OPTIMIZE`**: compacta los ficheros pequeños que dejan los `MERGE`.
+
+```bash
+docker compose run --rm spark spark-submit /opt/spark-jobs/delta_lake.py cargar
+docker compose run --rm spark spark-submit /opt/spark-jobs/delta_lake.py historia
+uv run python scripts/comprobar_paridad_spark.py --delta   # Delta (leído con deltalake) frente a dbt
+```
+
 ## Hallazgos sobre los datos
 
 - **Centinela 365243** (= 1000 años) significa "sin dato" en 6 columnas
@@ -368,7 +389,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 - **Tests:** pytest en Ubuntu y Windows.
 - **dbt build (muestra):** el pipeline completo `verify-data → simulate-source → ingest-bronze → dbt build → dbt source freshness` sobre la muestra sintética, y la paridad entre la carga incremental y la reconstrucción completa.
 - **Streaming (Redpanda):** arranca un broker y ejecuta los tests de integración del productor y el consumidor.
-- **Spark:** tests de los trabajos de PySpark (con Java 17) y paridad con dbt sobre la muestra.
+- **Spark:** tests de los trabajos de PySpark y Delta Lake (con Java 17) y paridad con dbt sobre la muestra.
 - **CDC (Postgres + Debezium):** levanta Postgres, Debezium y Redpanda, captura un día de cambios y comprueba que la réplica de dbt es idéntica a Postgres.
 - **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.

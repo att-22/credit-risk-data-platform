@@ -21,6 +21,7 @@ Uso (dentro del contenedor de Spark, ver compose.yaml):
 from __future__ import annotations
 
 import argparse
+import os
 import time
 
 from pyspark.sql import DataFrame, SparkSession
@@ -32,23 +33,41 @@ EXCLUIDAS = {"SK_ID_CURR", "SK_ID_BUREAU", "SK_ID_PREV", "_INGESTED_AT", "FECHA_
 FUNCIONES = {"MEAN": F.avg, "MAX": F.max, "MIN": F.min, "SUM": F.sum}
 
 
-def sesion(nombre: str = "credit-risk", particiones: int = 16) -> SparkSession:
-    return (
+DELTA_VERSION = "4.4.1"
+
+
+def sesion(nombre: str = "credit-risk", particiones: int = 16, delta: bool = False) -> SparkSession:
+    constructor = (
         SparkSession.builder.appName(nombre)
         .master("local[*]")  # un "clúster" de una máquina: un ejecutor por núcleo
         .config("spark.sql.shuffle.partitions", particiones)
         .config("spark.sql.session.timeZone", "UTC")
-        .getOrCreate()
     )
+    if delta:
+        # Delta Lake se engancha a Spark como extensión de SQL y como catálogo
+        constructor = constructor.config(
+            "spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension"
+        ).config(
+            "spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog"
+        )
+        if not os.getenv("DELTA_JARS_INCLUIDOS"):  # fuera de la imagen (p. ej. la CI): se descargan
+            constructor = constructor.config(
+                "spark.jars.packages", f"io.delta:delta-spark_2.13:{DELTA_VERSION}"
+            )
+    return constructor.getOrCreate()
 
 
-def bureau_balance_por_credito(balance: DataFrame) -> DataFrame:
-    """Resumen del historial mensual de cada crédito (= int_bureau_balance__por_credito)."""
+def bureau_balance_por_credito(balance: DataFrame, con_marca: bool = False) -> DataFrame:
+    """Resumen del historial mensual de cada crédito (= int_bureau_balance__por_credito).
+
+    con_marca añade _INGESTED_AT (la ingesta más reciente del crédito), la marca de
+    agua que usa la carga incremental con MERGE de delta_lake.py.
+    """
     impago = F.when(F.col("STATUS").isin("1", "2", "3", "4", "5"), 1.0).otherwise(0.0)
-    return balance.groupBy("SK_ID_BUREAU").agg(
-        F.count(F.lit(1)).alias("BB_MESES"),
-        F.avg(impago).alias("BB_PROP_IMPAGO"),
-    )
+    agregados = [F.count(F.lit(1)).alias("BB_MESES"), F.avg(impago).alias("BB_PROP_IMPAGO")]
+    if con_marca:
+        agregados.append(F.max("_ingested_at").alias("_INGESTED_AT"))
+    return balance.groupBy("SK_ID_BUREAU").agg(*agregados)
 
 
 def con_comportamiento(pagos: DataFrame) -> DataFrame:
