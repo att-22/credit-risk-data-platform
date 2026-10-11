@@ -91,6 +91,11 @@ jobs:
         working-directory: transform
         run: uv run dbt source freshness
 
+      # Carga incremental en tandas + una entrega tardía, y comparación con una
+      # reconstrucción completa: los modelos incrementales deben dar lo mismo.
+      - name: Paridad de la carga incremental con la reconstrucción completa
+        run: uv run python scripts/comprobar_paridad_incremental.py
+
   airflow:
     name: Airflow DAGs
     runs-on: ubuntu-latest

@@ -1,0 +1,23 @@
+version: 2
+
+# Seeds: pequeños CSV versionados en el repo que dbt carga como tablas
+# (`dbt seed`, o dentro de `dbt build`). Sirven para datos de referencia que no
+# vienen del origen: listas de códigos, umbrales, contratos...
+
+seeds:
+  - name: categorias_agregacion
+    description: >
+      Contrato de categorías de agregar_por_cliente: cada fila genera una
+      columna <prefijo>_<columna>_<valor>_PROP. Fijarlas hace que el esquema de
+      los modelos incrementales no dependa de los datos que hayan llegado.
+      Si el origen trae una categoría nueva, el test
+      assert_categorias_en_contrato avisa y hay que añadirla aquí.
+    config:
+      column_types:
+        prefijo: varchar
+        columna: varchar
+        valor: varchar
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [prefijo, columna, valor]

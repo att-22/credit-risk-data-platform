@@ -17,16 +17,16 @@ test as (
 
 ),
 
--- Tope de ingresos: percentil 99,9 calculado SOLO con train. A test se le aplica
--- el mismo tope; calcularlo con test sería usar información que el modelo no
--- vio al entrenar.
+-- Tope de ingresos: percentil 99,9 de AMT_INCOME_TOTAL en train, CONGELADO como
+-- parámetro (var tope_ingresos). Si se recalculara con los datos de cada día,
+-- cambiaría con cada entrega y, en un mart incremental, las filas antiguas
+-- quedarían con un tope distinto de las nuevas. Es lo que se hace en producción
+-- con todo lo que se "ajusta" sobre datos de entrenamiento: se fija hasta el
+-- próximo reentrenamiento. El test assert_tope_ingresos_vigente avisa si los
+-- datos se alejan de él.
 tope as (
 
-    select
-        quantile_cont(
-            AMT_INCOME_TOTAL, {{ var('percentil_recorte_ingresos') }}
-        ) as TOPE_INGRESOS
-    from train
+    select {{ var('tope_ingresos') }}::DOUBLE as TOPE_INGRESOS
 
 ),
 

@@ -8,6 +8,9 @@ Asset `home_credit_bronze` (lo actualiza `credit_risk_ingesta`), no sobre un
 horario. El grupo `dbt` lo genera astronomer-cosmos a partir del manifest de
 dbt: una tarea por modelo con `dbt build --select <modelo>`.
 
+Los agregados y el mart son incrementales: cada ejecución solo recalcula los
+clientes con datos nuevos. El parámetro `reconstruir` fuerza --full-refresh.
+
 ¿Muestra o completo? `resolver_datos` lo lee de los metadatos del evento que
 disparó la ejecución. Si se lanza a mano (sin evento), usa el parámetro `datos`.
 """
@@ -39,7 +42,12 @@ ENTORNO = entorno("ti.xcom_pull(task_ids='resolver_datos')")
             "muestra",
             enum=DATOS_VALIDOS,
             description="Solo para ejecuciones manuales (sin evento de bronze).",
-        )
+        ),
+        "reconstruir": Param(
+            False,
+            type="boolean",
+            description="Reconstruir los modelos incrementales desde cero (--full-refresh).",
+        ),
     },
     default_args={"retries": 1, "retry_delay": timedelta(seconds=30)},
     tags=["credit-risk", "dbt"],
@@ -101,6 +109,9 @@ def credit_risk_transformacion():
         operator_args={
             "append_env": True,
             "pool": POOL_DUCKDB,
+            # Los modelos incrementales solo procesan lo nuevo; con reconstruir=True
+            # se recalculan enteros (Cosmos convierte el texto "True"/"False" a booleano).
+            "full_refresh": "{{ params.reconstruir }}",
         },
     )
 

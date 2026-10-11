@@ -17,7 +17,11 @@ balance as (
 )
 
 select
-    bureau.*,
+    -- _INGESTED_AT: la ingesta más reciente del crédito o de su historial mensual,
+    -- para que la carga incremental detecte cambios en cualquiera de los dos
+    bureau.* replace (
+        greatest(bureau._INGESTED_AT, balance._INGESTED_AT) as _INGESTED_AT
+    ),
     balance.BB_MESES,
     balance.BB_PROP_IMPAGO
 from bureau

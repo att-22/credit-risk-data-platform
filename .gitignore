@@ -5,6 +5,8 @@ data/
 *.zip
 # Excepción: muestra pequeña (~2 MB) para ejecutar dbt en la CI (scripts/crear_muestra.py)
 !tests/fixtures/muestra/raw/*.csv
+# Excepción: seeds de dbt (datos de referencia propios, no de Kaggle)
+!transform/seeds/*.csv
 
 # --- Salidas generadas por el código (se recrean ejecutándolo) ---
 outputs/
