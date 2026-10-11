@@ -88,6 +88,27 @@ jobs:
         working-directory: transform
         run: uv run dbt source freshness
 
+  airflow:
+    name: Airflow DAGs
+    runs-on: ubuntu-latest
+    # Los tests del DAG necesitan Airflow y Cosmos: se ejecutan dentro de la
+    # misma imagen que usa compose.yaml, no en el entorno del proyecto.
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v5
+
+      - name: Construir la imagen de Airflow
+        run: docker build -f orchestration/Dockerfile -t credit-risk-airflow:ci .
+
+      - name: Tests de integridad del DAG
+        run: >
+          docker run --rm
+          -v "${{ github.workspace }}/orchestration/dags:/opt/airflow/dags:ro"
+          -v "${{ github.workspace }}/orchestration/tests:/opt/airflow/tests:ro"
+          credit-risk-airflow:ci
+          bash -c "pip install --quiet --no-cache-dir pytest==9.1.1
+          && python -m pytest /opt/airflow/tests -v -p no:cacheprovider"
+
   docker:
     name: Docker build
     runs-on: ubuntu-latest

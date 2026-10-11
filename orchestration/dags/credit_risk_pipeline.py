@@ -95,6 +95,8 @@ def credit_risk_pipeline():
             # Los paquetes (dbt_utils, dbt_expectations) ya están en la imagen.
             install_dbt_deps=False,
             copy_dbt_packages=True,
+            # Mismas variables que las tareas de Python (plantillas con params.datos).
+            env_vars=ENTORNO,
         ),
         profile_config=ProfileConfig(
             profile_name="credit_risk",
@@ -120,7 +122,6 @@ def credit_risk_pipeline():
             emit_datasets=False,
         ),
         operator_args={
-            "env": ENTORNO,
             "append_env": True,
             "pool": POOL_DUCKDB,
         },
