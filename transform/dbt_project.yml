@@ -26,6 +26,8 @@ models:
       +materialized: table  # tabla: es lo que consultan los usuarios y el modelo de ML
 
 # Variables del proyecto: se leen en los modelos con var() y se pueden cambiar
-# al ejecutar, p. ej. dbt build --vars '{percentil_recorte_ingresos: 0.99}'
+# al ejecutar, p. ej. dbt build --vars '{tope_ingresos: 1000000}'
 vars:
-  percentil_recorte_ingresos: 0.999  # tope de AMT_INCOME_TOTAL (igual que el TFM)
+  # Tope de AMT_INCOME_TOTAL: percentil 99,9 de train (igual que el TFM), congelado
+  # para que la carga incremental sea estable. Ver int_application__con_ratios.
+  tope_ingresos: 900000

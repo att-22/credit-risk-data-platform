@@ -49,8 +49,8 @@ flowchart LR
 | **Landing** | `simulate-source` ([simulate_source.py](src/credit_risk/simulate_source.py)) | Simula el sistema origen: reparte los CSV en 30 entregas diarias (`fecha=AAAA-MM-DD/<tabla>.csv.gz`), con cada cliente y todo su historial en el mismo día. Ninguna fila se pierde. |
 | **Bronze** | `ingest-bronze` ([ingest.py](src/credit_risk/ingest.py)) | Ingesta **incremental**: solo las entregas que no están en la tabla de control. Parquet particionado por `fecha_entrega`, tipos fijados por un contrato de esquema ([esquemas_bronze.json](src/credit_risk/esquemas_bronze.json)), columnas `_ingested_at` y `_source_file`. Atómica e idempotente. |
 | **Staging** | dbt, vistas | Limpieza sin cambiar la granularidad: el centinela `365243` de las columnas `DAYS_*` y el código `XNA` pasan a `NULL`. |
-| **Intermediate** | dbt, tablas | Agregación del historial a una fila por cliente (media, máximo, mínimo, suma y proporción de cada categoría) con una macro que descubre las columnas por introspección. |
-| **Gold** | dbt, tabla | Solicitud + ratios financieros + recorte de ingresos al p99,9 (calculado solo con train) + los 5 historiales agregados. Train y test en la misma tabla (columna `CONJUNTO`). |
+| **Intermediate** | dbt, tablas **incrementales** | Agregación del historial a una fila por cliente (media, máximo, mínimo, suma y proporción de cada categoría). Las columnas numéricas se descubren por introspección; las categorías salen de un contrato fijo (*seed*). Cada ejecución solo recalcula los clientes con datos nuevos. |
+| **Gold** | dbt, tabla **incremental** | Solicitud + ratios financieros + recorte de ingresos a un tope congelado (p99,9 de train) + los 5 historiales agregados. Train y test en la misma tabla (columna `CONJUNTO`). |
 
 ### Linaje de los modelos dbt
 
@@ -93,7 +93,7 @@ El grafo interactivo se genera con `dbt docs generate && dbt docs serve`.
 
 ## Calidad de datos
 
-`dbt build` ejecuta **55 tests de datos y 1 test unitario** intercalados con los modelos:
+`dbt build` ejecuta **58 tests de datos y 1 test unitario** intercalados con los modelos:
 
 - **Claves:** `unique` / `not_null` en cada modelo y clave compuesta
   `(SK_ID_BUREAU, MONTHS_BALANCE)` en `bureau_balance`.
@@ -102,11 +102,22 @@ El grafo interactivo se genera con `dbt docs generate && dbt docs serve`.
   reportan como `warn`: 43.041 en `bureau_balance` y 37.422 en `pos_cash_balance`.
 - **Reglas de negocio:** rangos (`EXT_SOURCE_*` ∈ [0, 1], `DAYS_BIRTH` < 0,
   cuota ≤ crédito...), valores aceptados y nº de filas del mart por conjunto.
-- **Deriva y esquema:** tasa de impago entre 7 % y 9 % (`warn`) y nº de
-  columnas del mart fijo (detecta categorías nuevas o desaparecidas).
+- **Deriva y esquema:** tasa de impago entre 7 % y 9 % (`warn`), nº de
+  columnas del mart fijo, categorías del origen dentro del contrato (`warn`) y
+  tope de ingresos congelado vigente: el p99,9 actual a menos de un 10 % (`warn`).
 - **Test unitario** de la lógica de ratios y del recorte de ingresos con datos
   inventados (sin depender de los datos reales).
 - **Frescura** de las fuentes con `dbt source freshness` sobre `_ingested_at`.
+
+### Carga incremental
+
+Los agregados por cliente y el mart son modelos **incrementales** (`delete+insert`
+por clave): cada ejecución recalcula solo los clientes con filas ingeridas
+después de la última (marca de agua sobre `_ingested_at`, la hora de ingesta, no
+la fecha de los datos, para no perder entregas tardías), y siempre con todo su
+historial. [`comprobar_paridad_incremental.py`](scripts/comprobar_paridad_incremental.py)
+carga los datos en tandas, simula una entrega tardía y comprueba que el mart es
+idéntico al de una reconstrucción completa (`--full-refresh`); se ejecuta en la CI.
 
 ## Orquestación con Airflow
 
@@ -242,7 +253,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 
 - **Lint:** `ruff check` y `ruff format --check`.
 - **Tests:** pytest en Ubuntu y Windows.
-- **dbt build (muestra):** el pipeline completo `verify-data → simulate-source → ingest-bronze → dbt build → dbt source freshness` sobre la muestra sintética.
+- **dbt build (muestra):** el pipeline completo `verify-data → simulate-source → ingest-bronze → dbt build → dbt source freshness` sobre la muestra sintética, y la paridad entre la carga incremental y la reconstrucción completa.
 - **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.
 

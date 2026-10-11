@@ -5,19 +5,32 @@
       - media, máximo, mínimo y suma de cada columna numérica,
       - la proporción de cada categoría de las columnas categóricas indicadas
         (equivalente a get_dummies + mean de pandas),
-      - el número de registros por grupo.
+      - el número de registros por grupo,
+      - _INGESTED_AT: la ingesta más reciente de las filas del grupo (la usa la
+        carga incremental como marca de agua).
 
-    Las columnas se descubren CONSULTANDO la base de datos (introspección), así
-    que si la tabla de origen gana una columna numérica, se agrega sola.
+    Las columnas NUMÉRICAS se descubren consultando la base de datos
+    (introspección). Las CATEGORÍAS, en cambio, salen de un contrato fijo
+    (seeds/categorias_agregacion.csv): en un modelo incremental el esquema no
+    puede depender de los datos que hayan llegado hasta hoy, o una categoría
+    nueva crearía una columna que los clientes antiguos no tendrían.
+
+    Carga incremental: solo se recalculan los clientes con filas ingeridas
+    después de la última ejecución, y con TODAS sus filas (no solo las nuevas),
+    así el resultado es correcto aunque el historial de un cliente llegue
+    repartido en varias entregas.
 
     Argumentos:
       relacion     -> modelo a agregar, p. ej. ref('stg_home_credit__bureau')
       clave        -> columna de agrupación, p. ej. 'SK_ID_CURR'
       prefijo      -> prefijo de las columnas generadas, p. ej. 'BURO'
-      categoricas  -> lista de columnas de texto a convertir en proporciones
+      categoricas  -> columnas de texto a convertir en proporciones
 #}
 
 {% macro agregar_por_cliente(relacion, clave, prefijo, categoricas=[]) %}
+
+    {#- Fuera de `if execute` para que dbt registre la dependencia con el seed -#}
+    {%- set contrato = ref('categorias_agregacion') -%}
 
     {#- Identificadores y metadatos: no tiene sentido sumarlos ni promediarlos -#}
     {%- set excluidas = ['SK_ID_CURR', 'SK_ID_BUREAU', 'SK_ID_PREV', '_INGESTED_AT'] -%}
@@ -44,11 +57,12 @@
             {%- endfor %}
         {%- endfor %}
 
-        {#- 2) Proporción de cada categoría: se consultan sus valores distintos -#}
+        {#- 2) Proporción de cada categoría del contrato -#}
         {%- for categorica in categoricas %}
             {%- set consulta -%}
-                select distinct {{ categorica }} from {{ relacion }}
-                where {{ categorica }} is not null order by 1
+                select valor from {{ contrato }}
+                where prefijo = '{{ prefijo }}' and columna = '{{ categorica }}'
+                order by valor
             {%- endset -%}
             {%- set valores = run_query(consulta).columns[0].values() if execute else [] -%}
             {%- for valor in valores %}
@@ -57,7 +71,16 @@
             {%- endfor %}
         {%- endfor %}
 
+        , max(_INGESTED_AT) as _INGESTED_AT
+
     from {{ relacion }}
+    {%- if is_incremental() %}
+    -- Incremental: clientes con alguna fila ingerida después de la última ejecución
+    where {{ clave }} in (
+        select {{ clave }} from {{ relacion }}
+        where _INGESTED_AT > (select max(_INGESTED_AT) from {{ this }})
+    )
+    {%- endif %}
     group by {{ clave }}
 
 {% endmacro %}

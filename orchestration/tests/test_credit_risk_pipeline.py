@@ -101,6 +101,12 @@ def test_las_tareas_de_duckdb_usan_el_pool(tareas_duckdb):
     assert {t.pool for t in tareas_duckdb} == {"duckdb"}
 
 
+def test_la_transformacion_no_reconstruye_por_defecto(transformacion):
+    assert transformacion.params.get_param("reconstruir").value is False
+    mart = transformacion.get_task("dbt.mart_scoring__clientes_model_build")
+    assert mart.full_refresh == "{{ params.reconstruir }}"
+
+
 # --- Comunes a los dos DAGs -----------------------------------------------------
 
 

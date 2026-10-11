@@ -10,7 +10,7 @@ version: 2
 
 models:
   - name: int_application__con_ratios
-    description: "Solicitudes de train y test (columna CONJUNTO) con ingresos recortados al percentil 99,9 de train y ratios financieros."
+    description: "Solicitudes de train y test (columna CONJUNTO) con ingresos recortados al tope congelado (var tope_ingresos, p99,9 de train) y ratios financieros."
     columns:
       - name: SK_ID_CURR
         data_tests: [unique, not_null]
@@ -97,14 +97,13 @@ models:
 unit_tests:
   - name: test_recorte_ingresos_y_ratios
     description: >
-      El tope de ingresos se calcula solo con train y se aplica también a test;
-      las divisiones entre 0 dan NULL y las EXT_SOURCE ignoran los NULL.
+      El tope de ingresos (var) se aplica a train y a test; las divisiones
+      entre 0 dan NULL y las EXT_SOURCE ignoran los NULL.
     model: int_application__con_ratios
     overrides:
-      # Con percentil 0,5 el tope es la mediana de los ingresos de train:
-      # mediana(100, 300) = 200. Si se calculara con test, sería 300.
+      # Tope pequeño para que los ingresos de prueba lo superen
       vars:
-        percentil_recorte_ingresos: 0.5
+        tope_ingresos: 200
     given:
       - input: ref('stg_home_credit__application_train')
         rows:
