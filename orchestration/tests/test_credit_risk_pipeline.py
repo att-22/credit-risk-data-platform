@@ -24,7 +24,10 @@ MANIFEST = Path("/opt/credit-risk/transform/target/manifest.json")
 ORIGEN = "credit_risk_origen"
 INGESTA = "credit_risk_ingesta"
 TRANSFORMACION = "credit_risk_transformacion"
-TODOS = [ORIGEN, INGESTA, TRANSFORMACION]
+EVENTOS = "credit_risk_eventos"
+TODOS = [ORIGEN, INGESTA, TRANSFORMACION, EVENTOS]
+# Todos reintentan menos el de eventos: reintentarlo republicaría el día entero
+CON_REINTENTOS = [ORIGEN, INGESTA, TRANSFORMACION]
 
 
 @pytest.fixture(scope="module")
@@ -170,7 +173,7 @@ def test_toda_la_transformacion_lee_bronze_hasta_el_mismo_corte(tareas_duckdb):
 # --- Comunes a los dos DAGs -----------------------------------------------------
 
 
-@pytest.mark.parametrize("dag_id", TODOS)
+@pytest.mark.parametrize("dag_id", CON_REINTENTOS)
 def test_todas_las_tareas_tienen_reintentos(dagbag, dag_id):
     assert all(t.retries >= 1 for t in dagbag.dags[dag_id].tasks)
 
@@ -179,6 +182,12 @@ def test_todas_las_tareas_tienen_reintentos(dagbag, dag_id):
 def test_una_sola_ejecucion_activa(dagbag, dag_id):
     # Dos ejecuciones a la vez escribirían en el mismo lago
     assert dagbag.dags[dag_id].max_active_runs == 1
+
+
+def test_los_eventos_no_se_reintentan_y_publican_el_dia_elegido(dagbag):
+    publicar = dagbag.dags[EVENTOS].get_task("publicar_eventos")
+    assert publicar.retries == 0
+    assert "produce-events --fecha {{ params.fecha }}" in publicar.bash_command
 
 
 @pytest.mark.parametrize("dag_id", TODOS)

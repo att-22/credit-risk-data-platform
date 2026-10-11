@@ -10,8 +10,9 @@ proyecto de ingeniería de datos profesional: código versionado, testeado,
 orquestado y desplegable.
 
 **Stack:** Python 3.13 · uv · DuckDB · Parquet · dbt (dbt-duckdb, dbt_utils,
-dbt_expectations) · Apache Airflow 3 · astronomer-cosmos · pytest · ruff ·
-pre-commit · GitHub Actions · Docker / Docker Compose
+dbt_expectations) · Apache Airflow 3 · astronomer-cosmos · FastAPI · httpx ·
+Redpanda (Kafka) · confluent-kafka · pytest · ruff · pre-commit · GitHub Actions ·
+Docker / Docker Compose
 
 ## Estado
 
@@ -185,6 +186,37 @@ flowchart LR
   imagen de Airflow y comprueban su estructura (Assets, pool, una tarea por
   modelo del manifest, reintentos...).
 
+## Streaming con Redpanda (Kafka)
+
+Además de las entregas diarias, el origen puede publicar cada solicitud como un
+**evento** en el topic `solicitudes` de [Redpanda](https://redpanda.com/)
+(compatible con la API de Kafka). Un consumidor que corre siempre los escribe
+en bronze en micro-lotes.
+
+```mermaid
+flowchart LR
+    p["produce-events<br/>(DAG credit_risk_eventos)"] -- "clave = SK_ID_CURR" --> t[["topic solicitudes<br/>3 particiones"]]
+    t --> c["consume-events<br/>(servicio consumidor-stream)"]
+    c -- válidos --> b[("bronze/stream_&lt;tabla&gt;/<br/>micro-lotes Parquet")]
+    c -- inválidos --> dlq[["topic solicitudes.dlq"]]
+```
+
+- **Productor** ([productor.py](src/credit_risk/productor.py)): `acks=all` e
+  idempotencia (los reintentos de red no duplican); la clave `SK_ID_CURR` lleva
+  todos los eventos de un cliente a la misma partición, en orden.
+- **Consumidor** ([consumidor.py](src/credit_risk/consumidor.py)): grupo de
+  consumidores con *commit* manual **después** de escribir cada micro-lote
+  (*at-least-once*: ante una caída no se pierde nada, pero puede repetirse);
+  validación contra el mismo contrato de esquema que la ingesta por lotes; los
+  eventos inválidos van a una **dead letter queue** con el motivo en una cabecera;
+  parada ordenada ante `SIGTERM`.
+- **Duplicados:** se eliminan al leer por `_evento_id`, porque también pueden
+  venir de republicar un día (offsets nuevos), no solo de relecturas.
+- **Tests de integración** contra un Redpanda real en la CI: DLQ, caída entre la
+  escritura y el *commit* (verificada con una mutación que confirma antes de
+  escribir y pierde eventos) y republicación.
+- Consola web de Redpanda (topics, mensajes, grupos): http://localhost:8082.
+
 ## Hallazgos sobre los datos
 
 - **Centinela 365243** (= 1000 años) significa "sin dato" en 6 columnas
@@ -235,7 +267,7 @@ en `<DATA_DIR>/raw/`, define `DATA_DIR` en `.env` y ejecuta los mismos comandos
 ### Airflow
 
 ```bash
-docker compose up -d --build    # Postgres + Airflow + API del origen (api-origen)
+docker compose up -d --build    # Postgres, Airflow, API del origen, Redpanda y su consumidor
 ```
 
 Abre http://localhost:8080 (sin usuario: configuración solo para uso local),
@@ -288,6 +320,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 - **Lint:** `ruff check` y `ruff format --check`.
 - **Tests:** pytest en Ubuntu y Windows.
 - **dbt build (muestra):** el pipeline completo `verify-data → simulate-source → ingest-bronze → dbt build → dbt source freshness` sobre la muestra sintética, y la paridad entre la carga incremental y la reconstrucción completa.
+- **Streaming (Redpanda):** arranca un broker y ejecuta los tests de integración del productor y el consumidor.
 - **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.
 

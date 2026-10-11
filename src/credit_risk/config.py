@@ -40,6 +40,11 @@ ORIGEN_API_URL = os.getenv("ORIGEN_API_URL", "http://localhost:8000")
 # de un gestor de secretos, nunca del código.
 ORIGEN_API_KEY = os.getenv("ORIGEN_API_KEY", "clave-solo-para-desarrollo")
 
+# Streaming (Fase 3.6): broker compatible con Kafka (Redpanda) y topics de eventos.
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "localhost:19092")
+TOPIC_SOLICITUDES = os.getenv("TOPIC_SOLICITUDES", "solicitudes")
+TOPIC_DLQ = os.getenv("TOPIC_DLQ", "solicitudes.dlq")  # dead letter queue: eventos inválidos
+
 # Salidas generadas por este proyecto (por defecto, ./outputs del repositorio).
 # También configurable: instalado como paquete (p. ej. en Docker), ROOT ya no
 # apunta al repositorio y hay que indicar la carpeta desde fuera.

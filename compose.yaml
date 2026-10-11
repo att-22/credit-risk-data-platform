@@ -36,6 +36,10 @@ x-airflow-common: &airflow-common
     # API del sistema origen (servicio api-origen): la usa la ingesta con canal=api
     ORIGEN_API_URL: http://api-origen:8000
     ORIGEN_API_KEY: &clave-api clave-solo-para-desarrollo
+    # Broker de streaming (servicio redpanda): lo usa el DAG credit_risk_eventos
+    KAFKA_BOOTSTRAP: redpanda:9092
+    # Almacén del "banco" (lo genera credit_risk_origen; lo leen la API y el productor)
+    ORIGEN_RAIZ: /opt/airflow/lake/origen
   volumes:
     # DAGs: carpeta del repo montada en vivo (los cambios se ven sin reconstruir)
     - ./orchestration/dags:/opt/airflow/dags
@@ -151,7 +155,64 @@ services:
       start_period: 10s
     restart: always
 
+  # Redpanda: broker de streaming compatible con la API de Kafka, en un solo
+  # binario (sin ZooKeeper ni JVM). Dos "listeners": redpanda:9092 para los
+  # contenedores y localhost:19092 para los programas que corren en Windows.
+  redpanda:
+    image: redpandadata/redpanda:v26.2.4
+    command:
+      - redpanda start
+      - --mode dev-container  # configuración pensada para desarrollo local
+      - --smp 1
+      - --memory 1G
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: always
+
+  # Interfaz web para ver topics, particiones, mensajes y grupos de consumidores
+  redpanda-console:
+    image: redpandadata/console:v3.12.0
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8082:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: always
+
+  # Consumidor de streaming: un servicio que corre siempre (no una tarea de
+  # Airflow, que empieza y termina). Escribe en /opt/airflow/lake/<conjunto>/bronze.
+  consumidor-stream:
+    image: credit-risk-airflow:local
+    entrypoint: /opt/credit-risk/.venv/bin/consume-events
+    command: ["--raiz-lagos", "/opt/airflow/lake"]
+    environment:
+      KAFKA_BOOTSTRAP: redpanda:9092
+      # Sin esto, Python acumula los print en un buffer (la salida no es una
+      # terminal) y `docker compose logs` no muestra nada hasta que el proceso acaba
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - lake:/opt/airflow/lake
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      api-origen:  # garantiza que la imagen ya está construida
+        condition: service_started
+    stop_grace_period: 30s  # tiempo para terminar el lote en curso y confirmar
+    restart: always
+
 volumes:
   postgres-db:
   airflow-logs:
   lake:
+  redpanda-data:
