@@ -7,6 +7,7 @@ en local: `docker compose up -d redpanda` y KAFKA_BOOTSTRAP_TEST=localhost:19092
 
 import json
 import os
+import time
 import uuid
 from datetime import date
 
@@ -142,6 +143,23 @@ def eventos_banco(raw_dir, tmp_path):
     return eventos_del_dia(tmp_path / "origen", "pruebas", DIA)
 
 
+def leer_topic(topic, esperados, plazo=30):
+    """Lee un topic desde el principio hasta tener `esperados` mensajes o agotar el plazo."""
+    lector = Consumer(
+        {
+            "bootstrap.servers": BROKER,
+            "group.id": f"lector-{uuid.uuid4().hex}",
+            "auto.offset.reset": "earliest",
+        }
+    )
+    lector.subscribe([topic])
+    mensajes, limite = [], time.monotonic() + plazo
+    while len(mensajes) < esperados and time.monotonic() < limite:
+        mensajes += [m for m in lector.consume(num_messages=esperados, timeout=1) if not m.error()]
+    lector.close()
+    return mensajes
+
+
 def consumir_todo(grupo, bronze, **kw):
     return consumir(lambda c: bronze, BROKER, grupo, segundos=0.5, hasta_vaciar=True, **kw)
 
@@ -154,13 +172,10 @@ def test_publica_y_consume_con_dlq(topics, eventos_banco, tmp_path):
 
     assert totales == {"escritos": len(eventos_banco), "dlq": 3}
     assert len(leer_stream(tmp_path / "bronze")) == len(eventos_banco)
-    # La DLQ guarda el mensaje original y el motivo del rechazo en una cabecera
-    lector = Consumer(
-        {"bootstrap.servers": BROKER, "group.id": "lector-dlq", "auto.offset.reset": "earliest"}
-    )
-    lector.subscribe([consumidor.TOPIC_DLQ])
-    mensajes = lector.consume(num_messages=10, timeout=10)
-    lector.close()
+    # La DLQ guarda el mensaje original y el motivo del rechazo en una cabecera.
+    # Grupo único y lectura en bucle: el reparto de particiones de un grupo puede
+    # tardar unos segundos, y una sola lectura con timeout fijo daría falsos fallos.
+    mensajes = leer_topic(consumidor.TOPIC_DLQ, esperados=3)
     assert len(mensajes) == 3
     assert all(dict(m.headers())["motivo"] for m in mensajes)
 
@@ -187,3 +202,13 @@ def test_republicar_un_dia_no_duplica_tras_deduplicar(topics, eventos_banco, tmp
 
     assert len(leer_stream(tmp_path / "bronze", deduplicar=False)) == 2 * len(eventos_banco)
     assert len(leer_stream(tmp_path / "bronze")) == len(eventos_banco)
+
+
+@integracion
+def test_espera_si_el_topic_todavia_no_existe(monkeypatch, tmp_path):
+    # Como el topic de Debezium, que no existe hasta el primer cambio: no debe caerse
+    monkeypatch.setattr(consumidor, "TOPIC_SOLICITUDES", f"aun-no-existe-{uuid.uuid4().hex}")
+    totales = consumir(
+        lambda c: tmp_path, BROKER, f"grupo-{uuid.uuid4().hex}", segundos=0.5, hasta_vaciar=True
+    )
+    assert totales == {"escritos": 0, "dlq": 0}

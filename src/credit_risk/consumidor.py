@@ -97,7 +97,40 @@ def consumir(
     hasta_vaciar: bool = False,
     fallar_tras_escribir: bool = False,
 ) -> dict[str, int]:
-    """Bucle del consumidor. Devuelve cuántos eventos se escribieron y cuántos fueron a la DLQ."""
+    """Consume el topic de solicitudes y escribe los eventos válidos en bronze."""
+    return bucle_consumo(
+        TOPIC_SOLICITUDES,
+        TOPIC_DLQ,
+        validar=lambda mensaje: validar(mensaje.value()),
+        escribir=lambda lote: escribir_lote(bronze_dir_de, lote),
+        bootstrap=bootstrap,
+        grupo=grupo,
+        tam_lote=tam_lote,
+        segundos=segundos,
+        hasta_vaciar=hasta_vaciar,
+        fallar_tras_escribir=fallar_tras_escribir,
+    )
+
+
+def bucle_consumo(
+    topic: str,
+    topic_dlq: str,
+    validar,
+    escribir,
+    bootstrap: str = KAFKA_BOOTSTRAP,
+    grupo: str = GRUPO,
+    tam_lote: int = 5_000,
+    segundos: float = 5.0,
+    hasta_vaciar: bool = False,
+    fallar_tras_escribir: bool = False,
+) -> dict[str, int]:
+    """Bucle genérico de consumo en micro-lotes con commit tras escribir (at-least-once).
+
+    `validar(mensaje)` devuelve (registro, None) si es válido, (None, motivo) si
+    debe ir a la DLQ o (None, None) si se ignora (p. ej. una "lápida" de Kafka).
+    `escribir(lote)` recibe [(partición, offset, registro), ...] y devuelve cuántos escribió.
+    Devuelve cuántos registros se escribieron y cuántos fueron a la DLQ.
+    """
     consumidor = Consumer(
         {
             "bootstrap.servers": bootstrap,
@@ -107,7 +140,7 @@ def consumir(
         }
     )
     dlq = Producer({"bootstrap.servers": bootstrap, "acks": "all"})
-    consumidor.subscribe([TOPIC_SOLICITUDES])
+    consumidor.subscribe([topic])
 
     parar = False
 
@@ -117,28 +150,36 @@ def consumir(
 
     signal.signal(signal.SIGTERM, al_recibir_senal)
 
-    lote: list[tuple[int, int, Evento]] = []
+    lote: list[tuple] = []
     sin_confirmar = 0  # mensajes leídos (válidos o no) desde el último commit
     totales = {"escritos": 0, "dlq": 0}
     ultimo_volcado = time.monotonic()
     vacios = 0
+    avisado = False
     try:
         while not parar:
             mensajes = consumidor.consume(num_messages=500, timeout=1.0)
             vacios = 0 if mensajes else vacios + 1
             for mensaje in mensajes:
                 if mensaje.error():
-                    if mensaje.error().code() != KafkaError._PARTITION_EOF:
+                    codigo = mensaje.error().code()
+                    if codigo == KafkaError.UNKNOWN_TOPIC_OR_PART:
+                        # El topic aún no existe (p. ej. Debezium lo crea con el primer
+                        # cambio): es transitorio, se sigue esperando en lugar de caer
+                        if not avisado:
+                            print(f"[espera] el topic '{topic}' todavía no existe")
+                            avisado = True
+                    elif codigo != KafkaError._PARTITION_EOF:
                         raise RuntimeError(mensaje.error())
                     continue
                 sin_confirmar += 1
-                evento, motivo = validar(mensaje.value())
-                if evento:
-                    lote.append((mensaje.partition(), mensaje.offset(), evento))
-                else:
+                registro, motivo = validar(mensaje)
+                if registro is not None:
+                    lote.append((mensaje.partition(), mensaje.offset(), registro))
+                elif motivo is not None:
                     origen = f"{mensaje.topic()}/{mensaje.partition()}/{mensaje.offset()}"
                     dlq.produce(
-                        TOPIC_DLQ,
+                        topic_dlq,
                         key=mensaje.key(),
                         value=mensaje.value(),
                         headers={"motivo": motivo, "origen": origen},
@@ -148,7 +189,7 @@ def consumir(
             vaciado = hasta_vaciar and vacios >= 3
             toca = len(lote) >= tam_lote or time.monotonic() - ultimo_volcado >= segundos
             if sin_confirmar and (toca or vaciado or parar):
-                totales["escritos"] += escribir_lote(bronze_dir_de, lote) if lote else 0
+                totales["escritos"] += escribir(lote) if lote else 0
                 dlq.flush(10)
                 if fallar_tras_escribir:
                     raise FalloSimulado("caída entre la escritura y el commit")

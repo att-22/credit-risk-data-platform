@@ -25,9 +25,10 @@ ORIGEN = "credit_risk_origen"
 INGESTA = "credit_risk_ingesta"
 TRANSFORMACION = "credit_risk_transformacion"
 EVENTOS = "credit_risk_eventos"
-TODOS = [ORIGEN, INGESTA, TRANSFORMACION, EVENTOS]
+CORE = "credit_risk_core"
+TODOS = [ORIGEN, INGESTA, TRANSFORMACION, EVENTOS, CORE]
 # Todos reintentan menos el de eventos: reintentarlo republicaría el día entero
-CON_REINTENTOS = [ORIGEN, INGESTA, TRANSFORMACION]
+CON_REINTENTOS = [ORIGEN, INGESTA, TRANSFORMACION, CORE]
 
 
 @pytest.fixture(scope="module")
@@ -188,6 +189,22 @@ def test_los_eventos_no_se_reintentan_y_publican_el_dia_elegido(dagbag):
     publicar = dagbag.dags[EVENTOS].get_task("publicar_eventos")
     assert publicar.retries == 0
     assert "produce-events --fecha {{ params.fecha }}" in publicar.bash_command
+
+
+def test_el_core_simula_la_actividad_del_dia_elegido(dagbag):
+    simular = dagbag.dags[CORE].get_task("simular_actividad")
+    assert "simulate-core --fecha {{ params.fecha }} --conjunto {{ params.datos }}" in (
+        simular.bash_command
+    )
+
+
+@pytest.mark.parametrize("dag_id", TODOS)
+def test_los_comandos_del_proyecto_existen_en_la_imagen(dagbag, dag_id):
+    # Un comando mal escrito o una imagen sin reconstruir solo fallarían al ejecutar el DAG
+    for tarea in dagbag.dags[dag_id].tasks:
+        for palabra in getattr(tarea, "bash_command", "").split():
+            if palabra.startswith("/opt/credit-risk/.venv/bin/"):
+                assert Path(palabra).is_file(), f"{tarea.task_id}: no existe {palabra}"
 
 
 @pytest.mark.parametrize("dag_id", TODOS)
