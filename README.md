@@ -10,13 +10,14 @@ proyecto de ingeniería de datos profesional: código versionado, testeado,
 orquestado y desplegable.
 
 **Stack:** Python 3.13 · uv · DuckDB · Parquet · dbt (dbt-duckdb, dbt_utils,
-dbt_expectations) · pytest · ruff · pre-commit · GitHub Actions · Docker
+dbt_expectations) · Apache Airflow 3 · astronomer-cosmos · pytest · ruff ·
+pre-commit · GitHub Actions · Docker / Docker Compose
 
 ## Estado
 
 - [x] Fase 0 — Bases: Git, empaquetado, tests, lint, CI con GitHub Actions, Docker
 - [x] Fase 1 — Modelado de datos con dbt + DuckDB (arquitectura medallion)
-- [ ] Fase 2 — Orquestación con Airflow
+- [x] Fase 2 — Orquestación con Airflow 3 (Cosmos, Assets, tests de DAGs)
 - [ ] Fase 3 — Ingesta incremental y streaming
 - [ ] Fase 4 — Procesamiento distribuido con Spark
 - [ ] Fase 5 — Cloud + Terraform + despliegue continuo
@@ -104,6 +105,42 @@ El grafo interactivo se genera con `dbt docs generate && dbt docs serve`.
   inventados (sin depender de los datos reales).
 - **Frescura** de las fuentes con `dbt source freshness` sobre `_ingested_at`.
 
+## Orquestación con Airflow
+
+El pipeline se orquesta con **Apache Airflow 3** en Docker Compose. Son dos DAGs
+conectados por **Assets**: la transformación no se programa por horario, sino
+cuando la ingesta publica datos nuevos en bronze.
+
+```mermaid
+flowchart LR
+    subgraph ing["DAG credit_risk_ingesta · diario 06:00 UTC"]
+        v[verify_data] --> i[ingest_bronze] --> pb[publicar_bronze]
+    end
+    bronze[("Asset<br/>home_credit_bronze")]
+    subgraph tr["DAG credit_risk_transformacion · schedule = Asset bronze"]
+        r[resolver_datos] --> f[dbt_source_freshness] --> d["dbt<br/>(Cosmos: 1 tarea por modelo)"] --> pm[publicar_mart]
+    end
+    mart[("Asset<br/>mart_scoring__clientes")]
+
+    pb --> bronze -- dispara --> r
+    pm --> mart
+```
+
+- **Assets con metadatos:** el evento de bronze lleva qué conjunto se ingirió
+  (`muestra` o `completo`); la transformación lo lee y procesa ese mismo conjunto.
+  Cada conjunto tiene su propio lago, así una prueba nunca pisa los datos completos.
+- **[astronomer-cosmos](https://github.com/astronomer/astronomer-cosmos):** lee el
+  `manifest.json` de dbt y crea una tarea por modelo (con sus tests) y una por
+  cada test que depende de varios modelos. Cada modelo tiene sus propios logs y
+  reintentos, y se puede relanzar solo una parte del grafo.
+- **Pool `duckdb` de 1 hueco:** DuckDB admite un único proceso escribiendo, así
+  que las tareas que lo usan se ejecutan de una en una.
+- **Imagen propia:** Airflow y el proyecto (dbt, pandas...) viven en entornos
+  virtuales separados dentro de la imagen para que sus dependencias no choquen.
+- **Tests de los DAGs en la CI:** 13 tests que cargan los DAGs dentro de la
+  imagen de Airflow y comprueban su estructura (Assets, pool, una tarea por
+  modelo del manifest, reintentos...).
+
 ## Hallazgos sobre los datos
 
 - **Centinela 365243** (= 1000 años) significa "sin dato" en 6 columnas
@@ -150,6 +187,21 @@ Descarga los CSV de [Kaggle](https://www.kaggle.com/competitions/home-credit-def
 en `<DATA_DIR>/raw/`, define `DATA_DIR` en `.env` y ejecuta los mismos comandos
 (sin el `export`). Con los datos completos, `dbt build` tarda unos 25 s.
 
+### Airflow
+
+```bash
+docker compose up -d --build    # Postgres + Airflow (api-server, scheduler, dag-processor)
+```
+
+Abre http://localhost:8080 (sin usuario: configuración solo para uso local),
+activa los DAGs `credit_risk_ingesta` y `credit_risk_transformacion`, y lanza la
+ingesta con **Trigger** eligiendo `datos = muestra` o `completo`. La
+transformación arranca sola al terminar la ingesta. Para pararlo:
+`docker compose down` (los volúmenes con el lago y el historial se conservan).
+
+Compose lee `DATA_DIR` del archivo `.env`; con `datos = muestra` no hacen falta
+los datos de Kaggle (la muestra sintética va dentro de la imagen).
+
 ### Docker
 
 ```bash
@@ -169,9 +221,14 @@ En Git Bash (Windows) hay que anteponer `MSYS_NO_PATHCONV=1` a `docker run`.
 │   ├── models/marts/          # tabla final de scoring
 │   ├── macros/                # limpieza y agregar_por_cliente
 │   └── tests/                 # tests singulares
+├── orchestration/         # Airflow
+│   ├── Dockerfile             # imagen de Airflow + Cosmos + el proyecto (venv aparte)
+│   ├── dags/                  # DAGs de ingesta y transformación
+│   └── tests/                 # tests de integridad de los DAGs
+├── compose.yaml           # Airflow en local con Docker Compose
 ├── scripts/               # utilidades (generar la muestra sintética)
 ├── tests/                 # tests de pytest y muestra de datos
-├── .github/workflows/     # CI: lint, tests (Linux + Windows), dbt, Docker
+├── .github/workflows/     # CI: lint, tests (Linux + Windows), dbt, DAGs de Airflow, Docker
 └── Dockerfile             # imagen multi-stage, usuario sin root
 ```
 
@@ -182,6 +239,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 - **Lint:** `ruff check` y `ruff format --check`.
 - **Tests:** pytest en Ubuntu y Windows.
 - **dbt build (muestra):** el pipeline completo `verify-data → ingest-bronze → dbt build → dbt source freshness` sobre la muestra sintética.
+- **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.
 
 `main` está protegida: solo se puede cambiar mediante PR, con la CI en verde y
