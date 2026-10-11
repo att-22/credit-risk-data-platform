@@ -73,7 +73,10 @@ jobs:
       - name: Verificar los datos de entrada
         run: uv run verify-data
 
-      - name: Ingesta a la capa bronze
+      - name: Simular las entregas diarias del sistema origen (landing zone)
+        run: uv run simulate-source
+
+      - name: Ingesta incremental a la capa bronze
         run: uv run ingest-bronze
 
       - name: Instalar los paquetes de dbt

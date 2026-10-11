@@ -30,6 +30,7 @@ responsabilidad única y se construye a partir de la anterior.
 ```mermaid
 flowchart LR
     csv[("CSV de Kaggle<br/>8 tablas · 2,5 GB")]
+    landing[("Landing zone<br/>30 entregas diarias")]
     subgraph lake["Lago de datos (DuckDB + Parquet)"]
         bronze["<b>Bronze</b><br/>Parquet · copia fiel<br/>+ trazabilidad"]
         stg["<b>Staging</b><br/>vistas · limpieza<br/>(centinelas, XNA)"]
@@ -38,13 +39,15 @@ flowchart LR
     end
     ml(["Modelo de scoring"])
 
-    csv -- "ingest-bronze<br/>(Python + DuckDB)" --> bronze
+    csv -- "simulate-source<br/>(sistema origen simulado)" --> landing
+    landing -- "ingest-bronze<br/>(incremental)" --> bronze
     bronze -- dbt --> stg --> int --> gold --> ml
 ```
 
 | Capa | Herramienta | Qué hace |
 |---|---|---|
-| **Bronze** | `ingest-bronze` ([ingest.py](src/credit_risk/ingest.py)) | CSV → Parquet (zstd), con columnas `_ingested_at` y `_source_file`. Escritura atómica e idempotente. 2,5 GB → ~530 MB en ~10 s. |
+| **Landing** | `simulate-source` ([simulate_source.py](src/credit_risk/simulate_source.py)) | Simula el sistema origen: reparte los CSV en 30 entregas diarias (`fecha=AAAA-MM-DD/<tabla>.csv.gz`), con cada cliente y todo su historial en el mismo día. Ninguna fila se pierde. |
+| **Bronze** | `ingest-bronze` ([ingest.py](src/credit_risk/ingest.py)) | Ingesta **incremental**: solo las entregas que no están en la tabla de control. Parquet particionado por `fecha_entrega`, tipos fijados por un contrato de esquema ([esquemas_bronze.json](src/credit_risk/esquemas_bronze.json)), columnas `_ingested_at` y `_source_file`. Atómica e idempotente. |
 | **Staging** | dbt, vistas | Limpieza sin cambiar la granularidad: el centinela `365243` de las columnas `DAYS_*` y el código `XNA` pasan a `NULL`. |
 | **Intermediate** | dbt, tablas | Agregación del historial a una fila por cliente (media, máximo, mínimo, suma y proporción de cada categoría) con una macro que descubre las columnas por introspección. |
 | **Gold** | dbt, tabla | Solicitud + ratios financieros + recorte de ingresos al p99,9 (calculado solo con train) + los 5 historiales agregados. Train y test en la misma tabla (columna `CONJUNTO`). |
@@ -175,7 +178,8 @@ usa la CI.
 ```bash
 export DATA_DIR=tests/fixtures/muestra
 uv run verify-data              # comprueba los CSV de entrada
-uv run ingest-bronze            # CSV -> lake/bronze/*.parquet
+uv run simulate-source          # CSV -> lake/landing (entregas diarias)
+uv run ingest-bronze            # landing -> lake/bronze (solo las entregas nuevas)
 cd transform
 uv run dbt deps                 # paquetes de dbt
 uv run dbt build                # modelos + tests (~2 s con la muestra)
@@ -238,7 +242,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 
 - **Lint:** `ruff check` y `ruff format --check`.
 - **Tests:** pytest en Ubuntu y Windows.
-- **dbt build (muestra):** el pipeline completo `verify-data → ingest-bronze → dbt build → dbt source freshness` sobre la muestra sintética.
+- **dbt build (muestra):** el pipeline completo `verify-data → simulate-source → ingest-bronze → dbt build → dbt source freshness` sobre la muestra sintética.
 - **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.
 

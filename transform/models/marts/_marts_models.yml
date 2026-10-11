@@ -17,7 +17,7 @@ models:
       # columnas y este test avisa antes de que el modelo de ML lo descubra.
       - dbt_expectations.expect_table_column_count_to_equal:
           arguments:
-            value: 455
+            value: 456  # 455 + fecha_entrega (día en que llegó la solicitud)
     columns:
       - name: SK_ID_CURR
         description: "Identificador de la solicitud (clave primaria)."

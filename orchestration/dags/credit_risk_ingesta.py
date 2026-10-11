@@ -1,6 +1,11 @@
-"""Ingesta: CSV de Home Credit -> capa bronze (Parquet).
+"""Ingesta: CSV de Home Credit -> landing zone -> capa bronze (Parquet particionado).
 
-    verify_data -> ingest_bronze -> publicar_bronze  ==>  Asset home_credit_bronze
+    verify_data -> simulate_source -> ingest_bronze -> publicar_bronze
+        ==>  Asset home_credit_bronze
+
+`simulate_source` hace de sistema origen: reparte los CSV en entregas diarias en
+la landing zone. `ingest_bronze` ingiere solo las entregas que aún no estén en
+bronze (tabla de control).
 
 Al terminar, `publicar_bronze` registra un evento en el Asset
 `home_credit_bronze` con el conjunto de datos procesado (`datos`) en sus
@@ -48,6 +53,13 @@ def credit_risk_ingesta():
         append_env=True,  # además de ENTORNO, conservar el entorno del contenedor
     )
 
+    simulate_source = BashOperator(
+        task_id="simulate_source",
+        bash_command=f"{BIN}/simulate-source",
+        env=ENTORNO,
+        append_env=True,
+    )
+
     ingest_bronze = BashOperator(
         task_id="ingest_bronze",
         bash_command=f"{BIN}/ingest-bronze",
@@ -60,7 +72,7 @@ def credit_risk_ingesta():
         """Registra el evento del Asset con el conjunto de datos en sus metadatos."""
         outlet_events[BRONZE].extra = {"datos": params["datos"]}
 
-    verify_data >> ingest_bronze >> publicar_bronze()
+    verify_data >> simulate_source >> ingest_bronze >> publicar_bronze()
 
 
 credit_risk_ingesta()
