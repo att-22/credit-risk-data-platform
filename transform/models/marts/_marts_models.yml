@@ -1,0 +1,31 @@
+version: 2
+
+# Capa gold (marts): tablas listas para consumir.
+# Aquí los tests protegen a quien usa los datos: la clave, el conjunto y el
+# número de filas (ver tests/assert_mart_scoring_filas_por_conjunto.sql).
+
+models:
+  - name: mart_scoring__clientes
+    description: >
+      Una fila por solicitud (train y test) con la solicitud limpia, el recorte de
+      ingresos al percentil 99,9 de train, los ratios financieros y las variables
+      agregadas del historial (prefijos BURO_, PREV_, INST_, POS_, CC_).
+    columns:
+      - name: SK_ID_CURR
+        description: "Identificador de la solicitud (clave primaria)."
+        data_tests:
+          - unique
+          - not_null
+      - name: CONJUNTO
+        description: "'train' (con TARGET) o 'test' (a puntuar)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['train', 'test']
+      - name: TARGET
+        description: "1 = impago, 0 = paga sin incidencias. NULL en test."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
