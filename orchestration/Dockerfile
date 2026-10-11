@@ -13,6 +13,10 @@
 
 FROM apache/airflow:3.3.2-python3.13
 
+# Cosmos va en el entorno de AIRFLOW (el DAG lo importa al leerse). Se fija la
+# versión de Airflow de la imagen para que pip no la actualice de rebote.
+RUN pip install --no-cache-dir "apache-airflow==${AIRFLOW_VERSION}" astronomer-cosmos==1.15.1
+
 # uv, la misma versión que en el Dockerfile principal
 COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /usr/local/bin/uv
 
@@ -37,9 +41,11 @@ COPY README.md ./
 COPY src ./src
 RUN uv sync --locked --no-dev --no-editable
 
-# 3) Proyecto dbt con sus paquetes ya descargados (las tareas no necesitan internet)
+# 3) Proyecto dbt con sus paquetes ya descargados (las tareas no necesitan internet).
+#    `dbt parse` genera target/manifest.json: Cosmos lo lee para crear una tarea
+#    por modelo sin tener que ejecutar dbt cada vez que Airflow lee el DAG.
 COPY transform ./transform
-RUN cd transform && /opt/credit-risk/.venv/bin/dbt deps
+RUN cd transform     && /opt/credit-risk/.venv/bin/dbt deps     && /opt/credit-risk/.venv/bin/dbt parse
 
 # 4) Muestra sintética para ejecuciones rápidas (parámetro "datos" del DAG)
 COPY tests/fixtures/muestra ./muestra

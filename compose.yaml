@@ -61,10 +61,12 @@ services:
       start_period: 5s
     restart: always
 
-  # Se ejecuta una vez al arrancar: crea/actualiza las tablas de Airflow y termina.
+  # Se ejecuta una vez al arrancar: crea/actualiza las tablas de Airflow, crea el
+  # pool "duckdb" y termina. El pool tiene 1 hueco: DuckDB solo admite un proceso
+  # escribiendo, así que las tareas que lo usan se ejecutan de una en una.
   airflow-init:
     <<: *airflow-common
-    command: version
+    command: ["pools", "set", "duckdb", "1", "DuckDB admite un solo proceso escribiendo"]
     environment:
       <<: *airflow-common-env
       _AIRFLOW_DB_MIGRATE: "true"
