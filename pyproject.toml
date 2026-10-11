@@ -48,6 +48,8 @@ dev = [
     "ruff>=0.17.0",
 ]
 spark = [
+    "delta-spark==4.4.1",
+    "deltalake>=1.6.6",
     "pyspark==4.2.0",
 ]
 
