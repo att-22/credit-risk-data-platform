@@ -218,6 +218,9 @@ jobs:
           uv run python spark_jobs/delta_lake.py historia --lake lake
           uv run python scripts/comprobar_paridad_spark.py --delta
 
+      - name: Notebook de Databricks en modo local (se comprueba a sí mismo)
+        run: uv run python spark_jobs/databricks_demo.py
+
   airflow:
     name: Airflow DAGs
     runs-on: ubuntu-latest

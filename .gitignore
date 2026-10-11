@@ -18,6 +18,11 @@ transform/logs/
 transform/dbt_packages/
 transform/.user.yml
 
+# --- Spark en local (catálogo y tablas gestionadas del notebook de Databricks) ---
+spark-warehouse/
+metastore_db/
+derby.log
+
 # --- Modelos entrenados (se regeneran con el pipeline) ---
 *.joblib
 *.keras
