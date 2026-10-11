@@ -23,8 +23,8 @@ Docker / Docker Compose
 - [x] Fase 1 — Modelado de datos con dbt + DuckDB (arquitectura medallion)
 - [x] Fase 2 — Orquestación con Airflow 3 (Cosmos, Assets, tests de DAGs)
 - [x] Fase 3 — Ingesta realista: incremental, API, streaming y CDC
-- [ ] Fase 4 — Spark y Delta Lake (en curso: PySpark y Delta Lake hechos)
-- [ ] Fase 5 — Cloud + Terraform + despliegue continuo
+- [x] Fase 4 — Spark, Delta Lake y Databricks
+- [ ] Fase 5 — Cloud + Terraform + despliegue continuo (en curso: Terraform sobre AWS emulado hecho)
 
 ## Arquitectura
 
@@ -308,6 +308,29 @@ al calculado de una vez). El mismo fichero se ejecuta en local y en la CI.
    (los *widgets* apuntan por defecto a `/Volumes/workspace/credit_risk/muestra` y
    `workspace.credit_risk`).
 
+## Infraestructura como código (Terraform + AWS)
+
+[`infra/`](infra) declara con Terraform la infraestructura de la plataforma en AWS:
+un bucket S3 para el lago (versionado, cifrado AES256, acceso público bloqueado y
+una regla de ciclo de vida que hace caducar `landing/`) y un rol IAM de mínimo
+privilegio para el pipeline, que solo puede leer y escribir en las cuatro zonas del lago.
+
+Funciona gratis y sin cuenta de AWS contra [Moto](https://github.com/getmoto/moto),
+un emulador de AWS de código abierto; lo único que cambia respecto a AWS real es una
+variable (`endpoint_aws`). Terraform se ejecuta en un contenedor:
+
+```bash
+docker compose --profile aws up -d moto        # emulador de AWS en el puerto 5000
+docker compose --profile aws run --rm terraform init
+docker compose --profile aws run --rm terraform apply -var-file=entornos/local.tfvars
+uv run --group aws python scripts/comprobar_infra.py   # comprobación independiente con boto3
+```
+
+`scripts/comprobar_infra.py` no se fía de Terraform: pregunta a la API de AWS si el
+bucket, las reglas de ciclo de vida y los permisos del rol son los declarados.
+[infra/README.md](infra/README.md) tiene los detalles, las rarezas de Moto
+encontradas por el camino y una tabla de equivalencias AWS / Google Cloud / Azure.
+
 ## Hallazgos sobre los datos
 
 - **Centinela 365243** (= 1000 años) significa "sin dato" en 6 columnas
@@ -403,10 +426,11 @@ En Git Bash (Windows) hay que anteponer `MSYS_NO_PATHCONV=1` a `docker run`.
 │   ├── core_bancario/         # esquema del Postgres del banco
 │   └── debezium/              # configuración de Debezium Server
 ├── spark/ · spark_jobs/   # imagen de Spark + Delta y trabajos de PySpark
+├── infra/                 # Terraform: lago S3 y rol IAM en AWS (emulado con Moto)
 ├── compose.yaml           # todo el entorno local con Docker Compose
 ├── scripts/               # muestra sintética, contrato de esquema y comprobaciones de paridad
 ├── tests/                 # tests de pytest (unitarios y de integración) y muestra de datos
-├── .github/workflows/     # CI: 9 jobs
+├── .github/workflows/     # CI: 10 jobs
 └── Dockerfile             # imagen multi-stage del proyecto, usuario sin root
 ```
 
@@ -420,6 +444,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 - **Streaming (Redpanda):** arranca un broker y ejecuta los tests de integración del productor y el consumidor.
 - **Spark:** tests de los trabajos de PySpark y Delta Lake (con Java 17), paridad con dbt sobre la muestra y el notebook de Databricks en modo local.
 - **CDC (Postgres + Debezium):** levanta Postgres, Debezium y Redpanda, captura un día de cambios y comprueba que la réplica de dbt es idéntica a Postgres.
+- **Terraform (AWS emulado):** `fmt`, `validate`, `apply` contra Moto, un segundo `plan` sin cambios, comprobación de los recursos con boto3 y `destroy`.
 - **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.
 

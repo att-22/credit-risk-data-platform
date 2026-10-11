@@ -221,6 +221,49 @@ jobs:
       - name: Notebook de Databricks en modo local (se comprueba a sí mismo)
         run: uv run python spark_jobs/databricks_demo.py
 
+  terraform:
+    name: Terraform (AWS emulado)
+    runs-on: ubuntu-latest
+    # La infraestructura como código se prueba igual que el resto: formato,
+    # validación y un despliegue real contra Moto (AWS emulado), comprobando
+    # después con boto3 que los recursos son los declarados y que se destruyen.
+    env:
+      TF: docker compose --profile aws run --rm -T terraform
+      VARS: -input=false -no-color -var-file=entornos/local.tfvars
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v5
+
+      - name: Arrancar Moto (de compose.yaml)
+        run: docker compose --profile aws up -d moto
+
+      - name: Formato y validación
+        run: |
+          $TF fmt -check -recursive -diff
+          $TF init -input=false -lockfile=readonly
+          $TF validate -no-color
+
+      - name: Desplegar en Moto
+        # Dos apply: Moto ignora las etiquetas que el proveedor manda al crear el
+        # bucket y el segundo las aplica (en AWS real basta con uno)
+        run: |
+          $TF apply $VARS -auto-approve
+          $TF apply $VARS -auto-approve
+
+      - name: Sin cambios pendientes (idempotencia)
+        run: $TF plan $VARS -detailed-exitcode
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Comprobar los recursos con boto3
+        run: uv run --locked --group aws python scripts/comprobar_infra.py
+
+      - name: Destruir
+        run: $TF destroy $VARS -auto-approve
+
   airflow:
     name: Airflow DAGs
     runs-on: ubuntu-latest
