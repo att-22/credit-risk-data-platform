@@ -33,6 +33,9 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    # API del sistema origen (servicio api-origen): la usa la ingesta con canal=api
+    ORIGEN_API_URL: http://api-origen:8000
+    ORIGEN_API_KEY: &clave-api clave-solo-para-desarrollo
   volumes:
     # DAGs: carpeta del repo montada en vivo (los cambios se ven sin reconstruir)
     - ./orchestration/dags:/opt/airflow/dags
@@ -120,6 +123,33 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
+
+  # API REST del sistema origen simulado (el "banco"): sirve las entregas que el
+  # DAG credit_risk_origen deja en /opt/airflow/lake/origen/<conjunto>/.
+  # Documentación interactiva en http://localhost:8000/docs
+  api-origen:
+    build:
+      context: .
+      dockerfile: orchestration/Dockerfile
+    image: credit-risk-airflow:local  # misma imagen: el proyecto ya está instalado en ella
+    entrypoint: /opt/credit-risk/.venv/bin/uvicorn
+    command: ["credit_risk.api_origen:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      ORIGEN_RAIZ: /opt/airflow/lake/origen
+      ORIGEN_API_KEY: *clave-api
+      # 5 % de respuestas 429/503 simuladas para que se vean los reintentos
+      ORIGEN_TASA_FALLOS: "0.05"
+    volumes:
+      - lake:/opt/airflow/lake
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/salud"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    restart: always
 
 volumes:
   postgres-db:

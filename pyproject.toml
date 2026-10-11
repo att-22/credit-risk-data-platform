@@ -14,10 +14,13 @@ requires-python = ">=3.13"
 dependencies = [
     "dbt-duckdb>=1.11.0",
     "duckdb>=1.5.6",
+    "fastapi>=0.143.0",
+    "httpx>=0.28.1",
     "numpy>=2.5.4",
     "pandas>=3.0.6",
     "pyarrow>=26.0.0",
     "python-dotenv>=1.2.4",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 # Comandos de terminal que instala el paquete: `nombre = "modulo:funcion"`.
@@ -25,6 +28,7 @@ dependencies = [
 verify-data = "credit_risk.verify_data:main"
 ingest-bronze = "credit_risk.ingest:main"
 simulate-source = "credit_risk.simulate_source:main"
+extract-api = "credit_risk.extract_api:main"
 
 # Cómo convertir el código en un paquete instalable.
 [build-system]

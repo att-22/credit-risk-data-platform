@@ -97,9 +97,27 @@ def test_los_ficheros_esperados_coinciden_con_el_proyecto():
     assert FICHEROS_ENTREGA == [f + ".gz" for f in salida.split(",")]
 
 
-def test_el_origen_simula_las_entregas(dagbag):
+def test_el_origen_genera_su_almacen_y_exporta_ficheros(dagbag):
     origen = dagbag.dags[ORIGEN]
-    assert origen.get_task("verify_data").downstream_task_ids == {"simulate_source"}
+    assert origen.get_task("verify_data").downstream_task_ids == {"generar_almacen"}
+    assert origen.get_task("generar_almacen").downstream_task_ids == {"exportar_ficheros"}
+    assert "--destino /opt/airflow/lake/origen/" in origen.get_task("generar_almacen").bash_command
+
+
+def test_la_ingesta_bifurca_por_canal(ingesta):
+    assert ingesta.get_task("elegir_canal").downstream_task_ids == {
+        "esperar_entrega",
+        "extraer_api",
+    }
+    ingest = ingesta.get_task("ingest_bronze")
+    assert ingest.upstream_task_ids == {"esperar_entrega", "extraer_api"}
+    # Una de las dos ramas siempre se salta: basta con que la otra funcione
+    assert ingest.trigger_rule == "none_failed_min_one_success"
+    assert (
+        "--fecha {{ ds }} --conjunto {{ params.datos }}"
+        in ingesta.get_task("extraer_api").bash_command
+    )
+    assert ingesta.params.get_param("canal").value == "ficheros"
 
 
 def test_la_transformacion_se_programa_con_bronze(transformacion):
