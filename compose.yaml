@@ -285,6 +285,31 @@ services:
     ports:
       - "4040:4040"
 
+  # --- Fase 5: AWS emulado ---------------------------------------------------------
+  # Moto imita las APIs de AWS (S3, IAM, STS...) en un único proceso, sin cuenta ni
+  # coste. Terraform y el pipeline le hablan igual que a AWS cambiando solo la URL.
+  moto:
+    profiles: ["aws"]
+    image: motoserver/moto:5.2.4
+    ports:
+      - "5000:5000"
+
+  # Terraform en contenedor: no hay que instalarlo. Uso (ver infra/README.md):
+  #   docker compose --profile aws run --rm terraform init
+  terraform:
+    profiles: ["aws"]
+    image: hashicorp/terraform:1.16.5
+    working_dir: /infra
+    volumes:
+      - ./infra:/infra
+    environment:
+      # Credenciales de mentira: Moto acepta cualquiera. Con AWS real vendrían de OIDC.
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      TF_IN_AUTOMATION: "1"
+    depends_on:
+      - moto
+
 volumes:
   postgres-db:
   airflow-logs:

@@ -45,3 +45,9 @@ __pycache__/
 Thumbs.db
 .vscode/
 .idea/
+
+# --- Terraform: plugins descargados y estado local (el lock SÍ se versiona) ---
+infra/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan

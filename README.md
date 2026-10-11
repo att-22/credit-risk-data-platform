@@ -26,8 +26,8 @@ Docker / Docker Compose
 - [x] Phase 1 — Data modelling with dbt + DuckDB (medallion architecture)
 - [x] Phase 2 — Orchestration with Airflow 3 (Cosmos, Assets, DAG tests)
 - [x] Phase 3 — Realistic ingestion: incremental loads, API, streaming and CDC
-- [ ] Phase 4 — Spark and Delta Lake (in progress: PySpark and Delta Lake done)
-- [ ] Phase 5 — Cloud + Terraform + continuous deployment
+- [x] Phase 4 — Spark, Delta Lake and Databricks
+- [ ] Phase 5 — Cloud + Terraform + continuous deployment (in progress: Terraform on emulated AWS done)
 
 ## Architecture
 
@@ -311,6 +311,29 @@ full computation). The same file runs locally and in CI.
    (the widgets default to `/Volumes/workspace/credit_risk/muestra` and
    `workspace.credit_risk`).
 
+## Infrastructure as code (Terraform + AWS)
+
+[`infra/`](infra) declares the platform's AWS infrastructure with Terraform: an S3
+bucket for the lake (versioning, AES256 encryption, public access blocked, a
+lifecycle rule that expires `landing/`) and a least-privilege IAM role for the
+pipeline that can only read and write inside the lake's four zones.
+
+It runs for free, with no AWS account, against [Moto](https://github.com/getmoto/moto),
+an open-source AWS emulator; the only difference from real AWS is one variable
+(`endpoint_aws`). Terraform itself runs in a container:
+
+```bash
+docker compose --profile aws up -d moto        # AWS emulator on port 5000
+docker compose --profile aws run --rm terraform init
+docker compose --profile aws run --rm terraform apply -var-file=entornos/local.tfvars
+uv run --group aws python scripts/comprobar_infra.py   # independent check with boto3
+```
+
+`scripts/comprobar_infra.py` does not trust Terraform: it asks the AWS API whether
+the bucket, the lifecycle rules and the role's permissions are the declared ones.
+[infra/README.md](infra/README.md) has the details, the Moto quirks found along the
+way and an AWS / Google Cloud / Azure equivalence table.
+
 ## Findings about the data
 
 - **Sentinel 365243** (= 1,000 years) means "no data" in 6 `DAYS_*` columns. In
@@ -405,10 +428,11 @@ In Git Bash (Windows), prefix `docker run` with `MSYS_NO_PATHCONV=1`.
 │   ├── core_bancario/         # schema of the bank's Postgres
 │   └── debezium/              # Debezium Server configuration
 ├── spark/ · spark_jobs/   # Spark + Delta image and PySpark jobs
+├── infra/                 # Terraform: S3 lake and IAM role on AWS (emulated with Moto)
 ├── compose.yaml           # the whole local environment with Docker Compose
 ├── scripts/               # synthetic sample, schema contract and parity checks
 ├── tests/                 # pytest tests (unit and integration) and data sample
-├── .github/workflows/     # CI: 9 jobs
+├── .github/workflows/     # CI: 10 jobs
 └── Dockerfile             # multi-stage project image, non-root user
 ```
 
@@ -422,6 +446,7 @@ On every PR, GitHub Actions runs in parallel:
 - **Streaming (Redpanda):** starts a broker and runs the producer and consumer integration tests.
 - **Spark:** tests of the PySpark and Delta Lake jobs (with Java 17), parity with dbt on the sample and the Databricks notebook in local mode.
 - **CDC (Postgres + Debezium):** starts Postgres, Debezium and Redpanda, captures a day of changes and checks that the dbt replica is identical to Postgres.
+- **Terraform (emulated AWS):** `fmt`, `validate`, `apply` against Moto, a second `plan` with no changes, a boto3 check of the resources and `destroy`.
 - **Airflow DAGs:** builds the Airflow image and runs the DAG integrity tests inside it.
 - **Docker build:** builds the image and runs a smoke test.
 
