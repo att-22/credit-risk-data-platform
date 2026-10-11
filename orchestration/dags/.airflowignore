@@ -1,0 +1,3 @@
+# Archivos de dags/ que NO son DAGs: el dag-processor no los lee como tales
+# (se pueden importar igualmente desde los DAGs). Sintaxis glob (la de Airflow 3).
+comun.py
