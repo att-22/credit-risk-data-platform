@@ -3,6 +3,8 @@ data/
 *.csv
 *.parquet
 *.zip
+# Excepción: muestra pequeña (~2 MB) para ejecutar dbt en la CI (scripts/crear_muestra.py)
+!tests/fixtures/muestra/raw/*.csv
 
 # --- Salidas generadas por el código (se recrean ejecutándolo) ---
 outputs/
