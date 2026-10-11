@@ -12,6 +12,7 @@ authors = [{ name = "Adrià Tadeo Tormos" }]
 requires-python = ">=3.13"
 # Librerías que el código necesita para FUNCIONAR. Se rellenan con `uv add`.
 dependencies = [
+    "confluent-kafka>=2.16.0",
     "dbt-duckdb>=1.11.0",
     "duckdb>=1.5.6",
     "fastapi>=0.143.0",
@@ -29,6 +30,8 @@ verify-data = "credit_risk.verify_data:main"
 ingest-bronze = "credit_risk.ingest:main"
 simulate-source = "credit_risk.simulate_source:main"
 extract-api = "credit_risk.extract_api:main"
+produce-events = "credit_risk.productor:main"
+consume-events = "credit_risk.consumidor:main"
 
 # Cómo convertir el código en un paquete instalable.
 [build-system]
