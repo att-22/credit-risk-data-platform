@@ -1,59 +1,65 @@
 # Credit Risk Data Platform
 
+🇬🇧 **English** · 🇪🇸 [Español](README.es.md)
+
 [![CI](https://github.com/att-22/credit-risk-data-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/att-22/credit-risk-data-platform/actions/workflows/ci.yml)
 
-Plataforma de datos construida a partir de mi TFM de *scoring* crediticio
-(dataset [Home Credit Default Risk](https://www.kaggle.com/competitions/home-credit-default-risk/data)).
+A data platform built from my master's thesis on credit *scoring*
+([Home Credit Default Risk](https://www.kaggle.com/competitions/home-credit-default-risk/data) dataset).
 
-El objetivo es llevar la ETL del TFM —hecha en notebooks con pandas— a un
-proyecto de ingeniería de datos profesional: código versionado, testeado,
-orquestado y desplegable.
+The goal is to take the thesis ETL —written in notebooks with pandas— and turn it
+into a professional data engineering project: versioned, tested, orchestrated
+and deployable code.
+
+> The code, model names and comments are in Spanish (the project started as a
+> Spanish-language thesis); this README explains everything in English.
 
 **Stack:** Python 3.13 · uv · DuckDB · Parquet · dbt (dbt-duckdb, dbt_utils,
 dbt_expectations) · Apache Airflow 3 · astronomer-cosmos · FastAPI · httpx ·
-Redpanda (Kafka) · confluent-kafka · PostgreSQL · Debezium · Apache Spark (PySpark) · Delta Lake · pytest · ruff · pre-commit · GitHub Actions ·
+Redpanda (Kafka) · confluent-kafka · PostgreSQL · Debezium · Apache Spark
+(PySpark) · Delta Lake · pytest · ruff · pre-commit · GitHub Actions ·
 Docker / Docker Compose
 
-## Estado
+## Status
 
-- [x] Fase 0 — Bases: Git, empaquetado, tests, lint, CI con GitHub Actions, Docker
-- [x] Fase 1 — Modelado de datos con dbt + DuckDB (arquitectura medallion)
-- [x] Fase 2 — Orquestación con Airflow 3 (Cosmos, Assets, tests de DAGs)
-- [x] Fase 3 — Ingesta realista: incremental, API, streaming y CDC
-- [ ] Fase 4 — Procesamiento distribuido con Spark
-- [ ] Fase 5 — Cloud + Terraform + despliegue continuo
+- [x] Phase 0 — Foundations: Git, packaging, tests, linting, CI with GitHub Actions, Docker
+- [x] Phase 1 — Data modelling with dbt + DuckDB (medallion architecture)
+- [x] Phase 2 — Orchestration with Airflow 3 (Cosmos, Assets, DAG tests)
+- [x] Phase 3 — Realistic ingestion: incremental loads, API, streaming and CDC
+- [ ] Phase 4 — Spark and Delta Lake (in progress: PySpark and Delta Lake done)
+- [ ] Phase 5 — Cloud + Terraform + continuous deployment
 
-## Arquitectura
+## Architecture
 
-Arquitectura *medallion* en un lago de datos local: cada capa tiene una
-responsabilidad única y se construye a partir de la anterior.
+A *medallion* architecture on a local data lake: each layer has a single
+responsibility and is built from the previous one.
 
 ```mermaid
 flowchart LR
-    csv[("CSV de Kaggle<br/>8 tablas · 2,5 GB")]
-    landing[("Landing zone<br/>30 entregas diarias")]
-    subgraph lake["Lago de datos (DuckDB + Parquet)"]
-        bronze["<b>Bronze</b><br/>Parquet · copia fiel<br/>+ trazabilidad"]
-        stg["<b>Staging</b><br/>vistas · limpieza<br/>(centinelas, XNA)"]
-        int["<b>Intermediate</b><br/>tablas · agregados<br/>por cliente"]
-        gold["<b>Gold</b><br/>mart_scoring__clientes<br/>1 fila por solicitud"]
+    csv[("Kaggle CSVs<br/>8 tables · 2.5 GB")]
+    landing[("Landing zone<br/>30 daily deliveries")]
+    subgraph lake["Data lake (DuckDB + Parquet)"]
+        bronze["<b>Bronze</b><br/>Parquet · faithful copy<br/>+ lineage columns"]
+        stg["<b>Staging</b><br/>views · cleaning<br/>(sentinels, XNA)"]
+        int["<b>Intermediate</b><br/>tables · per-customer<br/>aggregates"]
+        gold["<b>Gold</b><br/>mart_scoring__clientes<br/>1 row per application"]
     end
-    ml(["Modelo de scoring"])
+    ml(["Scoring model"])
 
-    csv -- "simulate-source<br/>(sistema origen simulado)" --> landing
+    csv -- "simulate-source<br/>(simulated source system)" --> landing
     landing -- "ingest-bronze<br/>(incremental)" --> bronze
     bronze -- dbt --> stg --> int --> gold --> ml
 ```
 
-| Capa | Herramienta | Qué hace |
+| Layer | Tool | What it does |
 |---|---|---|
-| **Landing** | `simulate-source` ([simulate_source.py](src/credit_risk/simulate_source.py)) o `extract-api` ([extract_api.py](src/credit_risk/extract_api.py)) | El origen simulado reparte los CSV en 30 entregas diarias (`fecha=AAAA-MM-DD/<tabla>.csv.gz`), con cada cliente y todo su historial en el mismo día, sin perder filas. Llegan como ficheros o se extraen de su API REST. |
-| **Bronze** | `ingest-bronze` ([ingest.py](src/credit_risk/ingest.py)) | Ingesta **incremental**: solo las entregas que no están en la tabla de control. Parquet particionado por `fecha_entrega`, tipos fijados por un contrato de esquema ([esquemas_bronze.json](src/credit_risk/esquemas_bronze.json)), columnas `_ingested_at` y `_source_file`. Atómica e idempotente. |
-| **Staging** | dbt, vistas | Limpieza sin cambiar la granularidad: el centinela `365243` de las columnas `DAYS_*` y el código `XNA` pasan a `NULL`. |
-| **Intermediate** | dbt, tablas **incrementales** | Agregación del historial a una fila por cliente (media, máximo, mínimo, suma y proporción de cada categoría). Las columnas numéricas se descubren por introspección; las categorías salen de un contrato fijo (*seed*). Cada ejecución solo recalcula los clientes con datos nuevos. |
-| **Gold** | dbt, tabla **incremental** | Solicitud + ratios financieros + recorte de ingresos a un tope congelado (p99,9 de train) + los 5 historiales agregados. Train y test en la misma tabla (columna `CONJUNTO`). |
+| **Landing** | `simulate-source` ([simulate_source.py](src/credit_risk/simulate_source.py)) or `extract-api` ([extract_api.py](src/credit_risk/extract_api.py)) | The simulated source system splits the CSVs into 30 daily deliveries (`fecha=YYYY-MM-DD/<table>.csv.gz`), each customer arriving with their whole history on the same day, without losing a single row. Deliveries arrive as files or are extracted from its REST API. |
+| **Bronze** | `ingest-bronze` ([ingest.py](src/credit_risk/ingest.py)) | **Incremental** ingestion: only the deliveries missing from the control table. Parquet partitioned by `fecha_entrega` (delivery date), types fixed by a schema contract ([esquemas_bronze.json](src/credit_risk/esquemas_bronze.json)), `_ingested_at` and `_source_file` columns. Atomic and idempotent. |
+| **Staging** | dbt, views | Cleaning without changing the grain: the `365243` sentinel in `DAYS_*` columns and the `XNA` code become `NULL`. |
+| **Intermediate** | dbt, **incremental** tables | Each customer's history aggregated into one row (mean, max, min, sum and the share of each category). Numeric columns are discovered by introspection; categories come from a fixed contract (a *seed*). Each run only recomputes customers with new data. |
+| **Gold** | dbt, **incremental** table | Application + financial ratios + income capped at a frozen threshold (train p99.9) + the 5 aggregated histories. Train and test share the same table (`CONJUNTO` column). |
 
-### Linaje de los modelos dbt
+### dbt model lineage
 
 ```mermaid
 flowchart LR
@@ -90,55 +96,55 @@ flowchart LR
     i_app & i_b & i_p & i_i & i_pos & i_cc --> mart
 ```
 
-El grafo interactivo se genera con `dbt docs generate && dbt docs serve`.
+The interactive graph is generated with `dbt docs generate && dbt docs serve`.
 
-## Calidad de datos
+## Data quality
 
-`dbt build` ejecuta **58 tests de datos y 1 test unitario** intercalados con los modelos:
+`dbt build` runs **58 data tests and 1 unit test** interleaved with the models:
 
-- **Claves:** `unique` / `not_null` en cada modelo y clave compuesta
-  `(SK_ID_BUREAU, MONTHS_BALANCE)` en `bureau_balance`.
-- **Integridad referencial** (`relationships`): todo cliente con historial
-  tiene solicitud (`error`). Los créditos huérfanos del propio dataset se
-  reportan como `warn`: 43.041 en `bureau_balance` y 37.422 en `pos_cash_balance`.
-- **Reglas de negocio:** rangos (`EXT_SOURCE_*` ∈ [0, 1], `DAYS_BIRTH` < 0,
-  cuota ≤ crédito...), valores aceptados y nº de filas del mart por conjunto.
-- **Deriva y esquema:** tasa de impago entre 7 % y 9 % (`warn`), nº de
-  columnas del mart fijo, categorías del origen dentro del contrato (`warn`) y
-  tope de ingresos congelado vigente: el p99,9 actual a menos de un 10 % (`warn`).
-- **Test unitario** de la lógica de ratios y del recorte de ingresos con datos
-  inventados (sin depender de los datos reales).
-- **Frescura** de las fuentes con `dbt source freshness` sobre `_ingested_at`.
+- **Keys:** `unique` / `not_null` on every model and a composite key
+  `(SK_ID_BUREAU, MONTHS_BALANCE)` on `bureau_balance`.
+- **Referential integrity** (`relationships`): every customer with history has an
+  application (`error`). Orphan records that come with the dataset itself are
+  reported as `warn`: 43,041 credits in `bureau_balance` and 37,422 in `pos_cash_balance`.
+- **Business rules:** ranges (`EXT_SOURCE_*` ∈ [0, 1], `DAYS_BIRTH` < 0,
+  annuity ≤ credit...), accepted values and the number of mart rows per dataset.
+- **Drift and schema:** default rate between 7% and 9% (`warn`), fixed number of
+  mart columns, source categories within the contract (`warn`) and the frozen
+  income cap still valid: the current p99.9 within 10% (`warn`).
+- **Unit test** of the ratio and income-cap logic with hand-written rows
+  (independent of the real data).
+- **Source freshness** with `dbt source freshness` on `_ingested_at`.
 
-### Carga incremental
+### Incremental loading
 
-Los agregados por cliente y el mart son modelos **incrementales** (`delete+insert`
-por clave): cada ejecución recalcula solo los clientes con filas ingeridas
-después de la última (marca de agua sobre `_ingested_at`, la hora de ingesta, no
-la fecha de los datos, para no perder entregas tardías), y siempre con todo su
-historial. [`comprobar_paridad_incremental.py`](scripts/comprobar_paridad_incremental.py)
-carga los datos en tandas, simula una entrega tardía y comprueba que el mart es
-idéntico al de una reconstrucción completa (`--full-refresh`); se ejecuta en la CI.
+The per-customer aggregates and the mart are **incremental** models
+(`delete+insert` by key): each run only recomputes the customers with rows
+ingested after the previous run (a watermark on `_ingested_at`, the ingestion
+time rather than the data date, so late deliveries are never missed), always
+with their full history. [`comprobar_paridad_incremental.py`](scripts/comprobar_paridad_incremental.py)
+loads the data in batches, simulates a late delivery and checks that the mart is
+identical to a full rebuild (`--full-refresh`); it runs in CI.
 
-## Orquestación con Airflow
+## Orchestration with Airflow
 
-El pipeline se orquesta con **Apache Airflow 3** en Docker Compose. Un DAG
-simula el sistema origen; la ingesta es **diaria** (cada ejecución procesa la
-entrega de su fecha lógica) y está conectada con la transformación por
-**Assets**: la transformación no se programa por horario, sino cuando la
-ingesta publica datos nuevos en bronze.
+The pipeline is orchestrated with **Apache Airflow 3** on Docker Compose. One DAG
+simulates the source system; ingestion is **daily** (each run processes the
+delivery of its logical date) and is connected to the transformation through
+**Assets**: the transformation is not scheduled by time, but whenever ingestion
+publishes new data to bronze.
 
 ```mermaid
 flowchart LR
-    subgraph org["DAG credit_risk_origen · manual (simula al banco)"]
+    subgraph org["DAG credit_risk_origen · manual (simulates the bank)"]
         v[verify_data] --> g[generar_almacen] --> x[exportar_ficheros]
     end
-    almacen[("Almacén del banco")]
-    api(["API REST del origen<br/>FastAPI · servicio api-origen"])
-    landing[("Landing zone<br/>fecha=AAAA-MM-DD")]
+    almacen[("Bank's storage")]
+    api(["Source REST API<br/>FastAPI · api-origen service"])
+    landing[("Landing zone<br/>fecha=YYYY-MM-DD")]
     subgraph ing["DAG credit_risk_ingesta · @daily, catchup"]
         c{elegir_canal} --> e["esperar_entrega<br/>(sensor)"]
-        c --> a["extraer_api<br/>(paginación, reintentos)"]
+        c --> a["extraer_api<br/>(pagination, retries)"]
         e --> i["ingest_bronze<br/>--fecha {{ ds }}"]
         a --> i
         i --> pb[publicar_bronze]
@@ -148,257 +154,262 @@ flowchart LR
     api -. HTTP .-> a
     a --> landing
     bronze[("Asset<br/>home_credit_bronze")]
-    subgraph tr["DAG credit_risk_transformacion · schedule = Asset bronze"]
-        r[resolver_datos] --> f[dbt_source_freshness] --> d["dbt<br/>(Cosmos: 1 tarea por modelo)"] --> pm[publicar_mart]
+    subgraph tr["DAG credit_risk_transformacion · schedule = bronze Asset"]
+        r[resolver_datos] --> f[dbt_source_freshness] --> d["dbt<br/>(Cosmos: 1 task per model)"] --> pm[publicar_mart]
     end
     mart[("Asset<br/>mart_scoring__clientes")]
 
-    pb --> bronze -- dispara --> r
+    pb --> bronze -- triggers --> r
     pm --> mart
 ```
 
-- **Ingesta por fecha lógica:** la ejecución del día X ingiere la entrega del
-  día X (`{{ ds }}`), así que relanzar una ejecución (*Clear*) o hacer un
-  *backfill* de un rango reprocesa exactamente esos días. Con `catchup=True`, al
-  activar el DAG se crea una ejecución por cada día del periodo simulado.
-- **Dos canales de entrada** (parámetro `canal`, bifurcación con `@task.branch`):
-  - `ficheros`: el sensor `esperar_entrega` comprueba cada 30 s que el origen
-    haya dejado la entrega completa y, mientras espera, libera su hueco
+- **Ingestion by logical date:** the run for day X ingests the delivery for day X
+  (`{{ ds }}`), so clearing a run or backfilling a range reprocesses exactly those
+  days. With `catchup=True`, enabling the DAG creates one run per day of the
+  simulated period.
+- **Two input channels** (`canal` parameter, branching with `@task.branch`):
+  - `ficheros` (files): the `esperar_entrega` sensor checks every 30 s that the
+    source has left the complete delivery and frees its slot while waiting
     (`mode="reschedule"`).
-  - `api`: [`extract-api`](src/credit_risk/extract_api.py) descarga la entrega
-    de la [API del origen](src/credit_risk/api_origen.py) (FastAPI, clave en
-    `X-API-Key`, paginación por cursor) con reintentos ante 429/5xx (*backoff*
-    exponencial con *jitter*, respetando `Retry-After`) y verificando el total de
-    filas. Deja la entrega en la *landing* con el mismo contrato, así que el resto
-    del pipeline no cambia. La API simula un 5 % de fallos para ejercitar los reintentos.
-- **Assets con metadatos:** el evento de bronze lleva qué conjunto se ingirió
-  (`muestra` o `completo`); la transformación lo lee y procesa ese mismo conjunto.
-  Cada conjunto tiene su propio lago, así una prueba nunca pisa los datos completos.
-- **[astronomer-cosmos](https://github.com/astronomer/astronomer-cosmos):** lee el
-  `manifest.json` de dbt y crea una tarea por modelo (con sus tests) y una por
-  cada test que depende de varios modelos. Cada modelo tiene sus propios logs y
-  reintentos, y se puede relanzar solo una parte del grafo.
-- **Pool `duckdb` de 1 hueco:** DuckDB admite un único proceso escribiendo, así
-  que las tareas que lo usan se ejecutan de una en una.
-- **Imagen propia:** Airflow y el proyecto (dbt, pandas...) viven en entornos
-  virtuales separados dentro de la imagen para que sus dependencias no choquen.
-- **Tests de los DAGs en la CI:** 13 tests que cargan los DAGs dentro de la
-  imagen de Airflow y comprueban su estructura (Assets, pool, una tarea por
-  modelo del manifest, reintentos...).
+  - `api`: [`extract-api`](src/credit_risk/extract_api.py) downloads the delivery
+    from the [source API](src/credit_risk/api_origen.py) (FastAPI, `X-API-Key`
+    header, cursor pagination) retrying on 429/5xx (exponential *backoff* with
+    *jitter*, honouring `Retry-After`) and verifying the total row count. It
+    writes the delivery to the landing zone with the same contract, so the rest of
+    the pipeline does not change. The API simulates 5% failures to exercise the retries.
+- **Assets with metadata:** the bronze event carries which dataset was ingested
+  (`muestra` sample or `completo` full); the transformation reads it and processes
+  that same dataset. Each dataset has its own lake, so a test run never overwrites
+  the full data.
+- **[astronomer-cosmos](https://github.com/astronomer/astronomer-cosmos):** reads
+  the dbt `manifest.json` and creates one task per model (with its tests) and one
+  per test that depends on several models. Each model gets its own logs and
+  retries, and just part of the graph can be re-run.
+- **`duckdb` pool with 1 slot:** DuckDB allows a single writer process, so the
+  tasks that use it run one at a time.
+- **Custom image:** Airflow and the project (dbt, pandas...) live in separate
+  virtual environments inside the image so their dependencies never clash.
+- **DAG tests in CI:** 35 tests load the DAGs inside the Airflow image and check
+  their structure (Assets, pool, one task per manifest model, retries, commands
+  present in the image...).
 
-## Streaming con Redpanda (Kafka)
+## Streaming with Redpanda (Kafka)
 
-Además de las entregas diarias, el origen puede publicar cada solicitud como un
-**evento** en el topic `solicitudes` de [Redpanda](https://redpanda.com/)
-(compatible con la API de Kafka). Un consumidor que corre siempre los escribe
-en bronze en micro-lotes.
+Besides the daily deliveries, the source can publish each application as an
+**event** to the `solicitudes` topic on [Redpanda](https://redpanda.com/)
+(Kafka API compatible). An always-on consumer writes them to bronze in micro-batches.
 
 ```mermaid
 flowchart LR
-    p["produce-events<br/>(DAG credit_risk_eventos)"] -- "clave = SK_ID_CURR" --> t[["topic solicitudes<br/>3 particiones"]]
-    t --> c["consume-events<br/>(servicio consumidor-stream)"]
-    c -- válidos --> b[("bronze/stream_&lt;tabla&gt;/<br/>micro-lotes Parquet")]
-    c -- inválidos --> dlq[["topic solicitudes.dlq"]]
+    p["produce-events<br/>(DAG credit_risk_eventos)"] -- "key = SK_ID_CURR" --> t[["topic solicitudes<br/>3 partitions"]]
+    t --> c["consume-events<br/>(consumidor-stream service)"]
+    c -- valid --> b[("bronze/stream_&lt;table&gt;/<br/>Parquet micro-batches")]
+    c -- invalid --> dlq[["topic solicitudes.dlq"]]
 ```
 
-- **Productor** ([productor.py](src/credit_risk/productor.py)): `acks=all` e
-  idempotencia (los reintentos de red no duplican); la clave `SK_ID_CURR` lleva
-  todos los eventos de un cliente a la misma partición, en orden.
-- **Consumidor** ([consumidor.py](src/credit_risk/consumidor.py)): grupo de
-  consumidores con *commit* manual **después** de escribir cada micro-lote
-  (*at-least-once*: ante una caída no se pierde nada, pero puede repetirse);
-  validación contra el mismo contrato de esquema que la ingesta por lotes; los
-  eventos inválidos van a una **dead letter queue** con el motivo en una cabecera;
-  parada ordenada ante `SIGTERM`.
-- **Duplicados:** se eliminan al leer por `_evento_id`, porque también pueden
-  venir de republicar un día (offsets nuevos), no solo de relecturas.
-- **Tests de integración** contra un Redpanda real en la CI: DLQ, caída entre la
-  escritura y el *commit* (verificada con una mutación que confirma antes de
-  escribir y pierde eventos) y republicación.
-- Consola web de Redpanda (topics, mensajes, grupos): http://localhost:8082.
+- **Producer** ([productor.py](src/credit_risk/productor.py)): `acks=all` and
+  idempotence (network retries never duplicate); the `SK_ID_CURR` key sends all
+  of a customer's events to the same partition, in order.
+- **Consumer** ([consumidor.py](src/credit_risk/consumidor.py)): consumer group
+  with a manual *commit* **after** each micro-batch is written (*at-least-once*:
+  nothing is lost on a crash, but something may be repeated); validation against
+  the same schema contract as batch ingestion; invalid events go to a **dead
+  letter queue** with the reason in a header; graceful shutdown on `SIGTERM`.
+- **Duplicates:** removed on read by `_evento_id`, because they can also come from
+  republishing a day (new offsets), not only from re-reads.
+- **Integration tests** against a real Redpanda in CI: DLQ, a crash between the
+  write and the *commit* (verified with a mutation that commits before writing and
+  loses events) and republishing.
+- Redpanda web console (topics, messages, groups): http://localhost:8082.
 
-## CDC: captura de cambios de la base de datos del banco
+## CDC: change data capture from the bank's database
 
-La aplicación del banco guarda el estado vivo de cada solicitud en Postgres
-(`core.solicitudes`) y lo va cambiando (recibida → en revisión → aprobada o
-rechazada; algunas se borran). **Debezium** lee el WAL de Postgres por
-replicación lógica y publica cada `INSERT`, `UPDATE` y `DELETE` en Redpanda, sin
-cargar la base de datos con consultas y sin perder cambios intermedios.
+The bank's application keeps the live state of each application in Postgres
+(`core.solicitudes`) and keeps changing it (received → under review → approved
+or rejected; some get deleted). **Debezium** reads the Postgres WAL through
+logical replication and publishes every `INSERT`, `UPDATE` and `DELETE` to
+Redpanda, without loading the database with queries and without missing
+intermediate changes.
 
 ```mermaid
 flowchart LR
     pg[("Postgres<br/>core.solicitudes")] -- "WAL (pgoutput)" --> dbz["Debezium Server"]
     dbz --> t[["topic cdc.core.solicitudes<br/>op, before, after, LSN"]]
-    t --> c["consume-cdc<br/>(servicio consumidor-cdc)"]
-    c --> b[("bronze/cdc_solicitudes/<br/>registro de cambios")]
+    t --> c["consume-cdc<br/>(consumidor-cdc service)"]
+    c --> b[("bronze/cdc_solicitudes/<br/>change log")]
     b --> dbt["dbt (tag cdc)"]
-    dbt --> h["historial SCD2<br/>(versiones con validez)"]
-    dbt --> a["estado actual<br/>(réplica de la tabla)"]
+    dbt --> h["SCD2 history<br/>(versions with validity)"]
+    dbt --> a["current state<br/>(table replica)"]
 ```
 
-- Bronze guarda el **registro completo de cambios**, no solo el estado final; el
-  **LSN** (posición en el WAL) los ordena y sirve para deduplicar (el consumo es
-  *at-least-once*, con el mismo bucle que el streaming).
-- dbt construye el **historial SCD tipo 2** (cada versión con su intervalo de
-  validez, para consultas "¿en qué estado estaba el día D?") y la **réplica** del
-  estado actual. Los modelos se activan con `--vars '{con_cdc: true}'`.
-- [`comprobar_replica_cdc.py`](scripts/comprobar_replica_cdc.py) compara la
-  réplica con la tabla real de Postgres y verifica que cada solicitud tenga todas
-  sus versiones: perder *inserts* no cambia el estado final, pero sí el historial.
-  Se ejecuta en la CI con Postgres, Debezium y Redpanda reales.
+- Bronze keeps the **full change log**, not only the final state; the **LSN**
+  (position in the WAL) orders the changes and is used for deduplication
+  (consumption is *at-least-once*, with the same loop as the streaming consumer).
+- dbt builds the **SCD type 2 history** (each version with its validity interval,
+  for "what state was it in on day D?" queries) and the **replica** of the current
+  state. The models are enabled with `--vars '{con_cdc: true}'`.
+- [`comprobar_replica_cdc.py`](scripts/comprobar_replica_cdc.py) compares the
+  replica with the actual Postgres table and checks that every application has all
+  its versions: losing *inserts* does not change the final state, but it does
+  change the history. It runs in CI against real Postgres, Debezium and Redpanda.
 
 ## Spark
 
-[`spark_jobs/agregados.py`](spark_jobs/agregados.py) reimplementa en PySpark las
-agregaciones de las tablas más grandes (`bureau_balance`, 27 M filas;
-`installments_payments`, 13,6 M) y
-[`comprobar_paridad_spark.py`](scripts/comprobar_paridad_spark.py) verifica que
-el resultado es idéntico al de dbt. Spark se ejecuta en un contenedor (no hace
-falta Java en Windows):
+[`spark_jobs/agregados.py`](spark_jobs/agregados.py) reimplements in PySpark the
+aggregations of the largest tables (`bureau_balance`, 27M rows;
+`installments_payments`, 13.6M) and
+[`comprobar_paridad_spark.py`](scripts/comprobar_paridad_spark.py) verifies that
+the result is identical to dbt's. Spark runs in a container (no Java needed on
+Windows):
 
 ```bash
 docker compose run --rm --service-ports spark spark-submit /opt/spark-jobs/agregados.py --explicar
 ```
 
-Con estos datos (~530 MB) DuckDB es unas 5 veces más rápido: Spark paga un coste
-fijo (JVM, planificación de tareas, *shuffle*) que solo compensa cuando los datos
-no caben en una máquina y hay que repartir el trabajo entre varias.
+With this data (~530 MB) DuckDB is about 5x faster: Spark pays a fixed cost (JVM,
+task scheduling, *shuffle*) that only pays off when the data does not fit on one
+machine and the work has to be spread across several.
 
 ### Delta Lake
 
-[`spark_jobs/delta_lake.py`](spark_jobs/delta_lake.py) lleva bronze y el agregado
-por crédito a **tablas Delta**: Parquet más un registro de transacciones
-(`_delta_log/`) que añade garantías de base de datos:
+[`spark_jobs/delta_lake.py`](spark_jobs/delta_lake.py) turns bronze and the
+per-credit aggregate into **Delta tables**: Parquet plus a transaction log
+(`_delta_log/`) that adds database guarantees:
 
-- **ACID**: cada escritura es un *commit* atómico; nunca se lee una tabla a medias.
-- **`MERGE`** (*upsert*): el agregado se actualiza de forma incremental solo con los
-  créditos que tienen datos nuevos; una entrega tardía **actualiza** sus créditos
-  (25.390 en la prueba con el día 15) en lugar de duplicarlos.
-- ***Time travel***: cada *commit* es una versión que se puede volver a leer
-  (`versionAsOf`): el "corte de lectura" de la Fase 3, de forma nativa.
-- **Contrato de esquema**: escribir una columna que la tabla no tiene es un error.
-- **`OPTIMIZE`**: compacta los ficheros pequeños que dejan los `MERGE`.
-
-```bash
-docker compose run --rm spark spark-submit /opt/spark-jobs/delta_lake.py cargar
-docker compose run --rm spark spark-submit /opt/spark-jobs/delta_lake.py historia
-uv run python scripts/comprobar_paridad_spark.py --delta   # Delta (leído con deltalake) frente a dbt
-```
-
-## Hallazgos sobre los datos
-
-- **Centinela 365243** (= 1000 años) significa "sin dato" en 6 columnas
-  `DAYS_*`. En `DAYS_EMPLOYED` son 55.374 solicitudes (jubilados y
-  desempleados). Sin limpiarlo, la media pasa de −2.384 a +63.815 días.
-- **Hay un cliente real con `SK_ID_CURR = 365243`.** El TFM reemplazaba el
-  centinela en toda la tabla y le borraba el historial. Aquí se limpia
-  columna a columna.
-- **Paridad con el TFM:** 0 diferencias numéricas en las variables comunes. Las
-  únicas discrepancias están explicadas: `sum()` de todo nulos (0 en pandas,
-  `NULL` en SQL), el cliente 365243, y céntimos en `INST_PAGO_DIF` porque el
-  TFM restaba en float32.
-
-## Puesta en marcha
-
-Requisitos: [uv](https://docs.astral.sh/uv/). uv instala la versión de Python adecuada.
+- **ACID**: each write is an atomic *commit*; a half-written table is never read.
+- **`MERGE`** (*upsert*): the aggregate is updated incrementally with only the
+  credits that have new data; a late delivery **updates** its credits (25,390 in
+  the test with day 15) instead of duplicating them.
+- **Time travel**: each *commit* is a version that can be read again
+  (`versionAsOf`) — the Phase 3 "read cutoff", natively.
+- **Schema enforcement**: writing a column the table does not have is an error.
+- **`OPTIMIZE`**: compacts the small files left behind by the `MERGE`s.
 
 ```bash
-uv sync                         # entorno virtual + dependencias (uv.lock)
-cp .env.example .env            # y ajusta DATA_DIR a tu carpeta de datos
+docker compose run --rm spark spark-submit /opt/spark-jobs/delta_lake.py cargar    # load
+docker compose run --rm spark spark-submit /opt/spark-jobs/delta_lake.py historia  # history
+uv run python scripts/comprobar_paridad_spark.py --delta   # Delta (read with deltalake) vs dbt
 ```
 
-### Probar sin descargar los datos de Kaggle
+## Findings about the data
 
-El repositorio incluye una **muestra sintética** (314 clientes, 2,3 MB) en
-[tests/fixtures/muestra](tests/fixtures/muestra), generada con
-[scripts/crear_muestra.py](scripts/crear_muestra.py). Conserva las relaciones
-entre tablas, los tipos y las categorías, pero los valores de cada columna
-están barajados, así que ninguna fila corresponde a un cliente real. Es la que
-usa la CI.
+- **Sentinel 365243** (= 1,000 years) means "no data" in 6 `DAYS_*` columns. In
+  `DAYS_EMPLOYED` it covers 55,374 applications (retirees and unemployed).
+  Without cleaning it, the mean goes from −2,384 to +63,815 days.
+- **There is a real customer with `SK_ID_CURR = 365243`.** The thesis replaced the
+  sentinel across the whole table and wiped that customer's history. Here it is
+  cleaned column by column.
+- **Parity with the thesis:** 0 numeric differences on the shared features. The
+  only discrepancies are explained: `sum()` of all nulls (0 in pandas, `NULL` in
+  SQL), customer 365243, and cents in `INST_PAGO_DIF` because the thesis
+  subtracted in float32.
+
+## Getting started
+
+Requirements: [uv](https://docs.astral.sh/uv/) (it installs the right Python version).
+
+```bash
+uv sync                         # virtual environment + dependencies (uv.lock)
+cp .env.example .env            # and set DATA_DIR to your data folder
+```
+
+### Try it without downloading the Kaggle data
+
+The repository includes a **synthetic sample** (314 customers, 2.3 MB) in
+[tests/fixtures/muestra](tests/fixtures/muestra), generated with
+[scripts/crear_muestra.py](scripts/crear_muestra.py). It keeps the relationships
+between tables, the types and the categories, but each column's values are
+shuffled, so no row matches a real customer. CI uses it too.
 
 ```bash
 export DATA_DIR=tests/fixtures/muestra
-uv run verify-data              # comprueba los CSV de entrada
-uv run simulate-source          # CSV -> lake/landing (entregas diarias)
-uv run ingest-bronze            # landing -> lake/bronze (solo las entregas nuevas)
+uv run verify-data              # checks the input CSVs
+uv run simulate-source          # CSV -> lake/landing (daily deliveries)
+uv run ingest-bronze            # landing -> lake/bronze (only new deliveries)
 cd transform
-uv run dbt deps                 # paquetes de dbt
-uv run dbt build                # modelos + tests (~2 s con la muestra)
+uv run dbt deps                 # dbt packages
+uv run dbt build                # models + tests (~2 s with the sample)
 ```
 
-### Con los datos completos
+### With the full data
 
-Descarga los CSV de [Kaggle](https://www.kaggle.com/competitions/home-credit-default-risk/data)
-en `<DATA_DIR>/raw/`, define `DATA_DIR` en `.env` y ejecuta los mismos comandos
-(sin el `export`). Con los datos completos, `dbt build` tarda unos 25 s.
+Download the CSVs from [Kaggle](https://www.kaggle.com/competitions/home-credit-default-risk/data)
+into `<DATA_DIR>/raw/`, set `DATA_DIR` in `.env` and run the same commands
+(without the `export`). With the full data, `dbt build` takes about 25 s.
 
 ### Airflow
 
 ```bash
-docker compose up -d --build    # Airflow, API del origen, Redpanda, core bancario, Debezium y consumidores
+docker compose up -d --build    # Airflow, source API, Redpanda, core banking DB, Debezium and consumers
 ```
 
-Abre http://localhost:8080 (sin usuario: configuración solo para uso local),
-lanza `credit_risk_origen` (genera las entregas del "banco": las sirve la API en
-http://localhost:8000/docs y deja una copia en la *landing zone*) y activa
-`credit_risk_transformacion` y `credit_risk_ingesta`: la ingesta procesa los 30
-días uno a uno y cada día dispara la transformación. Por defecto se usa la
-muestra; para los datos completos, lanza el origen con `datos = completo` y un
-*backfill* de la ingesta con el mismo parámetro. Con `canal = api`, la ingesta
-extrae las entregas de la API en lugar de esperar los ficheros. Para pararlo:
-`docker compose down` (los volúmenes con el lago y el historial se conservan).
+Open http://localhost:8080 (no login: local-only configuration), trigger
+`credit_risk_origen` (it generates the "bank's" deliveries: the API serves them at
+http://localhost:8000/docs and a copy lands in the landing zone) and enable
+`credit_risk_transformacion` and `credit_risk_ingesta`: ingestion processes the 30
+days one by one and each day triggers the transformation. The sample is used by
+default; for the full data, trigger the source DAG with `datos = completo` and a
+backfill of the ingestion with the same parameter. With `canal = api`, ingestion
+extracts the deliveries from the API instead of waiting for files. To stop it:
+`docker compose down` (the volumes with the lake and the run history are kept).
 
-Compose lee `DATA_DIR` del archivo `.env`; con `datos = muestra` no hacen falta
-los datos de Kaggle (la muestra sintética va dentro de la imagen).
+Compose reads `DATA_DIR` from `.env`; with `datos = muestra` the Kaggle data is not
+needed (the synthetic sample ships inside the image).
 
 ### Docker
 
 ```bash
 docker build -t credit-risk .
-docker run --rm -v "<ruta a DATA_DIR>:/data:ro" credit-risk   # verify-data
+docker run --rm -v "<path to DATA_DIR>:/data:ro" credit-risk   # verify-data
 ```
 
-En Git Bash (Windows) hay que anteponer `MSYS_NO_PATHCONV=1` a `docker run`.
+In Git Bash (Windows), prefix `docker run` with `MSYS_NO_PATHCONV=1`.
 
-## Estructura
+## Repository layout
 
 ```
-├── src/credit_risk/       # paquete Python: configuración, verificación e ingesta
-├── transform/             # proyecto dbt
-│   ├── models/staging/        # limpieza (vistas)
-│   ├── models/intermediate/   # agregaciones por cliente (tablas)
-│   ├── models/marts/          # tabla final de scoring
-│   ├── macros/                # limpieza y agregar_por_cliente
-│   └── tests/                 # tests singulares
-├── orchestration/         # Airflow
-│   ├── Dockerfile             # imagen de Airflow + Cosmos + el proyecto (venv aparte)
-│   ├── dags/                  # DAGs de ingesta y transformación
-│   └── tests/                 # tests de integridad de los DAGs
-├── compose.yaml           # Airflow en local con Docker Compose
-├── scripts/               # utilidades (generar la muestra sintética)
-├── tests/                 # tests de pytest y muestra de datos
-├── .github/workflows/     # CI: lint, tests (Linux + Windows), dbt, DAGs de Airflow, Docker
-└── Dockerfile             # imagen multi-stage, usuario sin root
+├── src/credit_risk/       # Python package: config, source simulator, ingestion,
+│                          #   source API and extraction, streaming and CDC
+├── transform/             # dbt project
+│   ├── models/staging/        # cleaning (views)
+│   ├── models/intermediate/   # per-customer aggregates (incremental tables)
+│   ├── models/marts/          # final scoring table
+│   ├── models/cdc/            # SCD2 history and replica of the core banking DB
+│   ├── seeds/                 # category contract
+│   ├── macros/                # cleaning, aggregation, read cutoff, watermark
+│   └── tests/                 # singular tests
+├── orchestration/         # Airflow and the simulated "bank" services
+│   ├── Dockerfile             # Airflow image + Cosmos + the project (separate venv)
+│   ├── dags/                  # source, ingestion, transformation, events and core DAGs
+│   ├── tests/                 # DAG integrity tests
+│   ├── core_bancario/         # schema of the bank's Postgres
+│   └── debezium/              # Debezium Server configuration
+├── spark/ · spark_jobs/   # Spark + Delta image and PySpark jobs
+├── compose.yaml           # the whole local environment with Docker Compose
+├── scripts/               # synthetic sample, schema contract and parity checks
+├── tests/                 # pytest tests (unit and integration) and data sample
+├── .github/workflows/     # CI: 9 jobs
+└── Dockerfile             # multi-stage project image, non-root user
 ```
 
-## Integración continua
+## Continuous integration
 
-En cada PR, GitHub Actions ejecuta en paralelo:
+On every PR, GitHub Actions runs in parallel:
 
-- **Lint:** `ruff check` y `ruff format --check`.
-- **Tests:** pytest en Ubuntu y Windows.
-- **dbt build (muestra):** el pipeline completo `verify-data → simulate-source → ingest-bronze → dbt build → dbt source freshness` sobre la muestra sintética, y la paridad entre la carga incremental y la reconstrucción completa.
-- **Streaming (Redpanda):** arranca un broker y ejecuta los tests de integración del productor y el consumidor.
-- **Spark:** tests de los trabajos de PySpark y Delta Lake (con Java 17) y paridad con dbt sobre la muestra.
-- **CDC (Postgres + Debezium):** levanta Postgres, Debezium y Redpanda, captura un día de cambios y comprueba que la réplica de dbt es idéntica a Postgres.
-- **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
-- **Docker build:** construcción de la imagen y prueba de humo.
+- **Lint:** `ruff check` and `ruff format --check`.
+- **Tests:** pytest on Ubuntu and Windows.
+- **dbt build (sample):** the full pipeline `verify-data → simulate-source → ingest-bronze → dbt build → dbt source freshness` on the synthetic sample, plus the parity between incremental loading and a full rebuild.
+- **Streaming (Redpanda):** starts a broker and runs the producer and consumer integration tests.
+- **Spark:** tests of the PySpark and Delta Lake jobs (with Java 17) and parity with dbt on the sample.
+- **CDC (Postgres + Debezium):** starts Postgres, Debezium and Redpanda, captures a day of changes and checks that the dbt replica is identical to Postgres.
+- **Airflow DAGs:** builds the Airflow image and runs the DAG integrity tests inside it.
+- **Docker build:** builds the image and runs a smoke test.
 
-`main` está protegida: solo se puede cambiar mediante PR, con la CI en verde y
+`main` is protected: it can only change through a PR, with green CI and
 *squash merge*.
 
-## Datos
+## Data
 
-Los datos originales **no** están en este repositorio (pesan 2,5 GB y tienen la
-licencia de la competición de Kaggle). Se leen desde la carpeta indicada en la
-variable de entorno `DATA_DIR`; el lago (`lake/`) se genera localmente.
+The original data is **not** in this repository (it is 2.5 GB and subject to the
+Kaggle competition licence). It is read from the folder set in the `DATA_DIR`
+environment variable; the lake (`lake/`) is generated locally.
