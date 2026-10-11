@@ -3,6 +3,10 @@ version: 2
 # Capa intermediate: agregaciones del historial crediticio.
 # El test más importante aquí es `unique` sobre la clave: garantiza que cada
 # modelo tiene la granularidad que dice tener y que ningún JOIN ha duplicado filas.
+#
+# En los *__por_cliente, `relationships` comprueba que todo cliente con historial
+# tiene una solicitud. Si no la tuviera, el LEFT JOIN del mart descartaría su
+# historial sin avisar.
 
 models:
   - name: int_application__con_ratios
@@ -27,13 +31,25 @@ models:
     description: "Historial del buró agregado por cliente (prefijo BURO_)."
     columns:
       - name: SK_ID_CURR
-        data_tests: [unique, not_null]
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_application__con_ratios')
+                field: SK_ID_CURR
 
   - name: int_previous_application__por_cliente
     description: "Solicitudes anteriores agregadas por cliente (prefijo PREV_)."
     columns:
       - name: SK_ID_CURR
-        data_tests: [unique, not_null]
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_application__con_ratios')
+                field: SK_ID_CURR
 
   - name: int_installments_payments__con_comportamiento
     description: "Pagos de cuotas con diferencia, ratio y días de retraso/adelanto."
@@ -42,16 +58,66 @@ models:
     description: "Comportamiento de pago agregado por cliente (prefijo INST_)."
     columns:
       - name: SK_ID_CURR
-        data_tests: [unique, not_null]
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_application__con_ratios')
+                field: SK_ID_CURR
 
   - name: int_pos_cash_balance__por_cliente
     description: "Saldos de créditos al consumo agregados por cliente (prefijo POS_)."
     columns:
       - name: SK_ID_CURR
-        data_tests: [unique, not_null]
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_application__con_ratios')
+                field: SK_ID_CURR
 
   - name: int_credit_card_balance__por_cliente
     description: "Saldos de tarjetas agregados por cliente (prefijo CC_)."
     columns:
       - name: SK_ID_CURR
-        data_tests: [unique, not_null]
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_application__con_ratios')
+                field: SK_ID_CURR
+
+
+# Tests unitarios: comprueban la LÓGICA del SQL con datos inventados y pequeños,
+# sin depender de los datos reales. dbt sustituye cada ref() por las filas de
+# `given`, ejecuta el modelo y compara el resultado con `expect`.
+unit_tests:
+  - name: test_recorte_ingresos_y_ratios
+    description: >
+      El tope de ingresos se calcula solo con train y se aplica también a test;
+      las divisiones entre 0 dan NULL y las EXT_SOURCE ignoran los NULL.
+    model: int_application__con_ratios
+    overrides:
+      # Con percentil 0,5 el tope es la mediana de los ingresos de train:
+      # mediana(100, 300) = 200. Si se calculara con test, sería 300.
+      vars:
+        percentil_recorte_ingresos: 0.5
+    given:
+      - input: ref('stg_home_credit__application_train')
+        rows:
+          # Caso normal: 3 puntuaciones externas (media 0,5; desviación 0,5)
+          - {SK_ID_CURR: 1, TARGET: 0, AMT_INCOME_TOTAL: 100, AMT_CREDIT: 1000, AMT_ANNUITY: 50, CNT_FAM_MEMBERS: 2, DAYS_EMPLOYED: -1000, DAYS_BIRTH: -10000, EXT_SOURCE_1: 0.0, EXT_SOURCE_2: 0.5, EXT_SOURCE_3: 1.0}
+          # Ingresos por encima del tope, crédito 0, familia 0 y una sola EXT_SOURCE
+          - {SK_ID_CURR: 2, TARGET: 1, AMT_INCOME_TOTAL: 300, AMT_CREDIT: 0, AMT_ANNUITY: 30, CNT_FAM_MEMBERS: 0, DAYS_EMPLOYED: null, DAYS_BIRTH: -20000, EXT_SOURCE_1: null, EXT_SOURCE_2: 0.75, EXT_SOURCE_3: null}
+      - input: ref('stg_home_credit__application_test')
+        rows:
+          # Ingresos de test por encima del tope de train y sin EXT_SOURCE
+          - {SK_ID_CURR: 3, AMT_INCOME_TOTAL: 1000, AMT_CREDIT: 400, AMT_ANNUITY: 20, CNT_FAM_MEMBERS: 1, DAYS_EMPLOYED: -500, DAYS_BIRTH: -5000, EXT_SOURCE_1: null, EXT_SOURCE_2: null, EXT_SOURCE_3: null}
+    expect:
+      rows:
+        - {SK_ID_CURR: 1, CONJUNTO: train, TARGET: 0, AMT_INCOME_TOTAL: 100, RATIO_CREDITO_INGRESOS: 10, RATIO_CUOTA_INGRESOS: 0.5, RATIO_CUOTA_CREDITO: 0.05, INGRESO_POR_PERSONA: 50, PORC_VIDA_EMPLEADO: 0.1, EXT_SOURCE_MEDIA: 0.5, EXT_SOURCE_MIN: 0.0, EXT_SOURCE_MAX: 1.0, EXT_SOURCE_DESV: 0.5}
+        - {SK_ID_CURR: 2, CONJUNTO: train, TARGET: 1, AMT_INCOME_TOTAL: 200, RATIO_CREDITO_INGRESOS: 0, RATIO_CUOTA_INGRESOS: 0.15, RATIO_CUOTA_CREDITO: null, INGRESO_POR_PERSONA: null, PORC_VIDA_EMPLEADO: null, EXT_SOURCE_MEDIA: 0.75, EXT_SOURCE_MIN: 0.75, EXT_SOURCE_MAX: 0.75, EXT_SOURCE_DESV: null}
+        - {SK_ID_CURR: 3, CONJUNTO: test, TARGET: null, AMT_INCOME_TOTAL: 200, RATIO_CREDITO_INGRESOS: 2, RATIO_CUOTA_INGRESOS: 0.1, RATIO_CUOTA_CREDITO: 0.05, INGRESO_POR_PERSONA: 200, PORC_VIDA_EMPLEADO: 0.1, EXT_SOURCE_MEDIA: null, EXT_SOURCE_MIN: null, EXT_SOURCE_MAX: null, EXT_SOURCE_DESV: null}

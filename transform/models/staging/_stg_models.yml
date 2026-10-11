@@ -50,16 +50,43 @@ models:
           - not_null
 
   - name: stg_home_credit__bureau_balance
+    # Clave compuesta: un crédito tiene una sola fila por mes.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [SK_ID_BUREAU, MONTHS_BALANCE]
     columns:
       - name: SK_ID_BUREAU
         data_tests:
           - not_null
+          # Integridad referencial: todo crédito con historial debería existir
+          # en bureau. Hay 43.041 que no (3,1 M filas; huérfanos del dataset), así
+          # que solo avisa (warn) en lugar de romper el build.
+          - relationships:
+              arguments:
+                to: ref('stg_home_credit__bureau')
+                field: SK_ID_BUREAU
+              config:
+                severity: warn
+      - name: STATUS
+        description: "0 = al día, 1-5 = tramos de días de retraso, C = cerrado, X = desconocido."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['0', '1', '2', '3', '4', '5', 'C', 'X']
 
   - name: stg_home_credit__pos_cash_balance
     columns:
       - name: SK_ID_PREV
         data_tests:
           - not_null
+          # 37.422 créditos (340.561 filas) sin solicitud en previous_application.
+          - relationships:
+              arguments:
+                to: ref('stg_home_credit__previous_application')
+                field: SK_ID_PREV
+              config:
+                severity: warn
 
   - name: stg_home_credit__credit_card_balance
     columns:

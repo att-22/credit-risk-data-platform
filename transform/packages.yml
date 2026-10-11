@@ -1,0 +1,10 @@
+# Paquetes de dbt: macros y tests escritos por la comunidad (como dependencias
+# de Python, pero para dbt). Se instalan con `dbt deps` en dbt_packages/ y las
+# versiones exactas quedan fijadas en package-lock.yml.
+packages:
+  # Utilidades generales: tests de combinaciones únicas, expresiones, rangos...
+  - package: dbt-labs/dbt_utils
+    version: [">=1.3.0", "<2.0.0"]
+  # Tests estilo Great Expectations: rangos, medias, recuentos de columnas...
+  - package: metaplane/dbt_expectations
+    version: [">=0.10.0", "<0.11.0"]

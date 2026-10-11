@@ -1,8 +1,9 @@
 version: 2
 
 # Capa gold (marts): tablas listas para consumir.
-# Aquí los tests protegen a quien usa los datos: la clave, el conjunto y el
-# número de filas (ver tests/assert_mart_scoring_filas_por_conjunto.sql).
+# Aquí los tests protegen a quien usa los datos: la clave, el conjunto, el
+# número de filas (ver tests/assert_mart_scoring_filas_por_conjunto.sql), el
+# número de columnas y los rangos de valores con sentido de negocio.
 
 models:
   - name: mart_scoring__clientes
@@ -10,6 +11,13 @@ models:
       Una fila por solicitud (train y test) con la solicitud limpia, el recorte de
       ingresos al percentil 99,9 de train, los ratios financieros y las variables
       agregadas del historial (prefijos BURO_, PREV_, INST_, POS_, CC_).
+    data_tests:
+      # "Contrato" ligero: las proporciones *_PROP se generan según las categorías
+      # que haya en los datos. Si aparece o desaparece una, cambia el número de
+      # columnas y este test avisa antes de que el modelo de ML lo descubra.
+      - dbt_expectations.expect_table_column_count_to_equal:
+          arguments:
+            value: 455
     columns:
       - name: SK_ID_CURR
         description: "Identificador de la solicitud (clave primaria)."
@@ -29,3 +37,35 @@ models:
           - accepted_values:
               arguments:
                 values: [0, 1]
+          # Deriva de datos: la tasa de impago de train es del 8,07 %. Si una
+          # nueva carga se aleja mucho, probablemente algo ha ido mal.
+          - dbt_expectations.expect_column_mean_to_be_between:
+              arguments:
+                min_value: 0.07
+                max_value: 0.09
+                row_condition: "CONJUNTO = 'train'"
+              config:
+                severity: warn
+
+      # Rangos con sentido de negocio
+      - name: EXT_SOURCE_1
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {min_value: 0, max_value: 1}}
+      - name: EXT_SOURCE_2
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {min_value: 0, max_value: 1}}
+      - name: EXT_SOURCE_3
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {min_value: 0, max_value: 1}}
+      - name: DAYS_BIRTH
+        description: "Días desde el nacimiento hasta la solicitud (negativo)."
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {max_value: 0, inclusive: false}}
+      - name: RATIO_CUOTA_CREDITO
+        description: "Cuota anual / crédito: siempre entre 0 y 1."
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {min_value: 0, max_value: 1}}
+      - name: PORC_VIDA_EMPLEADO
+        description: "Fracción de la vida trabajando en el empleo actual."
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {min_value: 0, max_value: 1}}
