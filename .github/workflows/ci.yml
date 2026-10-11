@@ -173,6 +173,48 @@ jobs:
       - name: Réplica del CDC idéntica a Postgres e historial completo
         run: uv run python scripts/comprobar_replica_cdc.py
 
+  spark:
+    name: Spark
+    runs-on: ubuntu-latest
+    # Tests de los trabajos de PySpark y paridad con dbt sobre la muestra. Spark
+    # necesita Java: se instala la 17 (la misma que la imagen de Spark).
+    env:
+      DATA_DIR: ${{ github.workspace }}/tests/fixtures/muestra
+      LAKE_DIR: ${{ github.workspace }}/lake
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v5
+
+      - name: Instalar Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Instalar Python y las dependencias (con el grupo spark)
+        run: uv sync --locked --group spark
+
+      - name: Tests de los trabajos de Spark
+        run: uv run pytest tests/spark
+
+      - name: Construir bronze y los modelos de dbt equivalentes
+        run: |
+          uv run simulate-source
+          uv run ingest-bronze
+          cd transform
+          uv run dbt deps
+          uv run dbt build --select +int_bureau_balance__por_credito +int_installments_payments__por_cliente --indirect-selection cautious
+
+      - name: Ejecutar el trabajo de Spark y comparar con dbt
+        run: |
+          uv run python spark_jobs/agregados.py --lake lake
+          uv run python scripts/comprobar_paridad_spark.py
+
   airflow:
     name: Airflow DAGs
     runs-on: ubuntu-latest

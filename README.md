@@ -11,7 +11,7 @@ orquestado y desplegable.
 
 **Stack:** Python 3.13 · uv · DuckDB · Parquet · dbt (dbt-duckdb, dbt_utils,
 dbt_expectations) · Apache Airflow 3 · astronomer-cosmos · FastAPI · httpx ·
-Redpanda (Kafka) · confluent-kafka · PostgreSQL · Debezium · pytest · ruff · pre-commit · GitHub Actions ·
+Redpanda (Kafka) · confluent-kafka · PostgreSQL · Debezium · Apache Spark (PySpark) · pytest · ruff · pre-commit · GitHub Actions ·
 Docker / Docker Compose
 
 ## Estado
@@ -19,7 +19,7 @@ Docker / Docker Compose
 - [x] Fase 0 — Bases: Git, empaquetado, tests, lint, CI con GitHub Actions, Docker
 - [x] Fase 1 — Modelado de datos con dbt + DuckDB (arquitectura medallion)
 - [x] Fase 2 — Orquestación con Airflow 3 (Cosmos, Assets, tests de DAGs)
-- [ ] Fase 3 — Ingesta incremental y streaming
+- [x] Fase 3 — Ingesta realista: incremental, API, streaming y CDC
 - [ ] Fase 4 — Procesamiento distribuido con Spark
 - [ ] Fase 5 — Cloud + Terraform + despliegue continuo
 
@@ -247,6 +247,23 @@ flowchart LR
   sus versiones: perder *inserts* no cambia el estado final, pero sí el historial.
   Se ejecuta en la CI con Postgres, Debezium y Redpanda reales.
 
+## Spark
+
+[`spark_jobs/agregados.py`](spark_jobs/agregados.py) reimplementa en PySpark las
+agregaciones de las tablas más grandes (`bureau_balance`, 27 M filas;
+`installments_payments`, 13,6 M) y
+[`comprobar_paridad_spark.py`](scripts/comprobar_paridad_spark.py) verifica que
+el resultado es idéntico al de dbt. Spark se ejecuta en un contenedor (no hace
+falta Java en Windows):
+
+```bash
+docker compose run --rm --service-ports spark spark-submit /opt/spark-jobs/agregados.py --explicar
+```
+
+Con estos datos (~530 MB) DuckDB es unas 5 veces más rápido: Spark paga un coste
+fijo (JVM, planificación de tareas, *shuffle*) que solo compensa cuando los datos
+no caben en una máquina y hay que repartir el trabajo entre varias.
+
 ## Hallazgos sobre los datos
 
 - **Centinela 365243** (= 1000 años) significa "sin dato" en 6 columnas
@@ -351,6 +368,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 - **Tests:** pytest en Ubuntu y Windows.
 - **dbt build (muestra):** el pipeline completo `verify-data → simulate-source → ingest-bronze → dbt build → dbt source freshness` sobre la muestra sintética, y la paridad entre la carga incremental y la reconstrucción completa.
 - **Streaming (Redpanda):** arranca un broker y ejecuta los tests de integración del productor y el consumidor.
+- **Spark:** tests de los trabajos de PySpark (con Java 17) y paridad con dbt sobre la muestra.
 - **CDC (Postgres + Debezium):** levanta Postgres, Debezium y Redpanda, captura un día de cambios y comprueba que la réplica de dbt es idéntica a Postgres.
 - **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.
