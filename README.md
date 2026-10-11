@@ -291,6 +291,26 @@ docker compose run --rm spark spark-submit /opt/spark-jobs/delta_lake.py histori
 uv run python scripts/comprobar_paridad_spark.py --delta   # Delta (read with deltalake) vs dbt
 ```
 
+### Databricks
+
+[`spark_jobs/databricks_demo.py`](spark_jobs/databricks_demo.py) is a notebook in
+Databricks source format that runs the same pipeline on **Databricks Free
+Edition** (serverless Spark, Unity Catalog, Delta built in): it reads the CSVs
+from a *volume* with the project's schema contract, writes managed Delta tables,
+reuses the functions of `agregados.py`, builds the per-credit aggregate with
+`MERGE` (including a late delivery), shows `DESCRIBE HISTORY`, `VERSION AS OF`
+and `OPTIMIZE`, and **checks itself** (the incremental aggregate must equal a
+full computation). The same file runs locally and in CI.
+
+1. Create a Databricks Free Edition account.
+2. **Workspace → Create → Git folder** with this repository's URL.
+3. In **Catalog → workspace**, create a schema `credit_risk` with a volume
+   `muestra`, and upload `bureau_balance.csv` and `installments_payments.csv`
+   from [tests/fixtures/muestra/raw](tests/fixtures/muestra/raw).
+4. Open `spark_jobs/databricks_demo.py` from the Git folder and click **Run all**
+   (the widgets default to `/Volumes/workspace/credit_risk/muestra` and
+   `workspace.credit_risk`).
+
 ## Findings about the data
 
 - **Sentinel 365243** (= 1,000 years) means "no data" in 6 `DAYS_*` columns. In
@@ -400,7 +420,7 @@ On every PR, GitHub Actions runs in parallel:
 - **Tests:** pytest on Ubuntu and Windows.
 - **dbt build (sample):** the full pipeline `verify-data → simulate-source → ingest-bronze → dbt build → dbt source freshness` on the synthetic sample, plus the parity between incremental loading and a full rebuild.
 - **Streaming (Redpanda):** starts a broker and runs the producer and consumer integration tests.
-- **Spark:** tests of the PySpark and Delta Lake jobs (with Java 17) and parity with dbt on the sample.
+- **Spark:** tests of the PySpark and Delta Lake jobs (with Java 17), parity with dbt on the sample and the Databricks notebook in local mode.
 - **CDC (Postgres + Debezium):** starts Postgres, Debezium and Redpanda, captures a day of changes and checks that the dbt replica is identical to Postgres.
 - **Airflow DAGs:** builds the Airflow image and runs the DAG integrity tests inside it.
 - **Docker build:** builds the image and runs a smoke test.
