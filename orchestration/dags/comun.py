@@ -7,6 +7,7 @@ path de Python.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from airflow.sdk import Asset
@@ -27,6 +28,25 @@ MART = Asset(name="mart_scoring__clientes", group="credit_risk")
 
 DATOS_VALIDOS = ["muestra", "completo"]
 
+# Periodo de entregas que genera el sistema origen simulado (simulate-source:
+# 30 días desde el 1 de septiembre). La ingesta diaria se programa en ese rango.
+PRIMERA_ENTREGA = datetime(2026, 9, 1)
+ULTIMA_ENTREGA = datetime(2026, 9, 30)
+
+# Ficheros de cada entrega (contrato con el origen). Es la misma lista que
+# credit_risk.config.TABLES, que aquí no se puede importar: el paquete vive en
+# otro entorno virtual. Un test comprueba que no se desincronizan.
+FICHEROS_ENTREGA = [
+    "application_train.csv.gz",
+    "application_test.csv.gz",
+    "bureau.csv.gz",
+    "bureau_balance.csv.gz",
+    "previous_application.csv.gz",
+    "POS_CASH_balance.csv.gz",
+    "installments_payments.csv.gz",
+    "credit_card_balance.csv.gz",
+]
+
 
 def entorno(datos: str) -> dict[str, str]:
     """Variables de entorno de las tareas para un conjunto de datos.
@@ -41,3 +61,8 @@ def entorno(datos: str) -> dict[str, str]:
         "LAKE_DIR": "/opt/airflow/lake/{{ " + datos + " }}",
         "OUTPUTS_DIR": "/opt/airflow/lake/{{ " + datos + " }}/outputs",
     }
+
+
+def landing(datos: str) -> Path:
+    """Landing zone de un conjunto de datos (LANDING_DIR por defecto: LAKE_DIR/landing)."""
+    return Path("/opt/airflow/lake") / datos / "landing"

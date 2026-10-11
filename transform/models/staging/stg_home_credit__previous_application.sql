@@ -28,7 +28,7 @@
 
 with origen as (
 
-    select * from {{ source('bronze', 'previous_application') }}
+    select * from {{ bronze_hasta_corte('previous_application') }}
 
 ),
 

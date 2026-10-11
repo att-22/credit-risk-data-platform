@@ -112,6 +112,10 @@ def credit_risk_transformacion():
             # Los modelos incrementales solo procesan lo nuevo; con reconstruir=True
             # se recalculan enteros (Cosmos convierte el texto "True"/"False" a booleano).
             "full_refresh": "{{ params.reconstruir }}",
+            # Corte de lectura: todas las tareas de esta ejecución ven bronze tal
+            # como estaba al empezar, aunque la ingesta siga escribiendo días nuevos
+            # (ver la macro bronze_hasta_corte). Lo posterior va a la siguiente ejecución.
+            "vars": {"corte_ingesta": "{{ dag_run.start_date }}"},
         },
     )
 

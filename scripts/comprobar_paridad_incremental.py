@@ -5,6 +5,8 @@ nuevo" tiene un fallo, el mart incremental acaba distinto del que se obtiene
 recalculando todo desde cero.
 
 Pasos (sobre el lago de LAKE_DIR, que se reconstruye entero):
+  0. Primera ejecución sin datos visibles (corte anterior a cualquier ingesta):
+     los modelos incrementales se crean vacíos y deben recuperarse después.
   1. Ingiere las entregas de la landing zone en tandas y, tras cada tanda,
      ejecuta dbt en modo incremental.
   2. Simula una entrega tardía: reingiere un día ya cargado y vuelve a ejecutar
@@ -94,6 +96,12 @@ def main() -> None:
     # Lago limpio: bronze y warehouse se reconstruyen desde la landing zone
     shutil.rmtree(BRONZE_DIR, ignore_errors=True)
     (LAKE_DIR / "warehouse.duckdb").unlink(missing_ok=True)
+
+    # 0) Primera ejecución que no ve ningún dato: crea las tablas incrementales
+    #    vacías (su marca de agua es NULL y no debe bloquear las cargas siguientes)
+    print("\n== Primera ejecución sin datos visibles")
+    ejecutar("ingest-bronze", "--fecha", dias[0].isoformat())
+    dbt_build("--vars", "{corte_ingesta: '1970-01-01 00:00:00+00'}")
 
     # 1) Carga incremental en tandas de días
     tamano = -(-len(dias) // args.tandas)  # división redondeando hacia arriba

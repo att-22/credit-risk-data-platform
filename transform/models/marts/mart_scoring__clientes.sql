@@ -57,7 +57,7 @@ tarjetas as (
 afectados as (
     {%- for parte in partes %}
     select SK_ID_CURR from {{ parte }}
-    where _INGESTED_AT > (select max(_INGESTED_AT) from {{ this }})
+    where _INGESTED_AT > (select {{ marca_de_agua() }})
     {%- if not loop.last %}
     union{% endif %}
     {%- endfor %}
