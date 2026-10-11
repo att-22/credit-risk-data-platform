@@ -4,34 +4,12 @@ from datetime import date
 
 import duckdb
 import pandas as pd
-import pytest
 
 from credit_risk.config import TABLES
 from credit_risk.simulate_source import simular_origen
 
 INICIO = date(2026, 9, 1)
 DIAS = 5
-
-
-@pytest.fixture
-def raw_dir(tmp_path):
-    """Las 8 tablas en miniatura: 4 clientes con historial y casos raros."""
-    tablas = {
-        "application_train": {"SK_ID_CURR": [1, 2, 3], "TARGET": [0, 1, 0]},
-        "application_test": {"SK_ID_CURR": [4], "AMT_CREDIT": ["0.10"]},  # texto con cero final
-        "bureau": {"SK_ID_CURR": [1, 1, 2], "SK_ID_BUREAU": [10, 11, 20]},
-        # El crédito 99 no existe en bureau: es un huérfano, como los 43.041 reales
-        "bureau_balance": {"SK_ID_BUREAU": [10, 10, 20, 99], "MONTHS_BALANCE": [0, -1, 0, 0]},
-        "previous_application": {"SK_ID_PREV": [100, 101], "SK_ID_CURR": [1, 4]},
-        "pos_cash_balance": {"SK_ID_PREV": [100], "SK_ID_CURR": [1]},
-        "installments_payments": {"SK_ID_PREV": [100, 101], "SK_ID_CURR": [1, 4]},
-        "credit_card_balance": {"SK_ID_PREV": [101], "SK_ID_CURR": [4]},
-    }
-    carpeta = tmp_path / "raw"
-    carpeta.mkdir()
-    for nombre, columnas in tablas.items():
-        pd.DataFrame(columnas).to_csv(carpeta / TABLES[nombre], index=False)
-    return carpeta
 
 
 def leer(landing, nombre):

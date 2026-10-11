@@ -46,7 +46,7 @@ flowchart LR
 
 | Capa | Herramienta | Qué hace |
 |---|---|---|
-| **Landing** | `simulate-source` ([simulate_source.py](src/credit_risk/simulate_source.py)) | Simula el sistema origen: reparte los CSV en 30 entregas diarias (`fecha=AAAA-MM-DD/<tabla>.csv.gz`), con cada cliente y todo su historial en el mismo día. Ninguna fila se pierde. |
+| **Landing** | `simulate-source` ([simulate_source.py](src/credit_risk/simulate_source.py)) o `extract-api` ([extract_api.py](src/credit_risk/extract_api.py)) | El origen simulado reparte los CSV en 30 entregas diarias (`fecha=AAAA-MM-DD/<tabla>.csv.gz`), con cada cliente y todo su historial en el mismo día, sin perder filas. Llegan como ficheros o se extraen de su API REST. |
 | **Bronze** | `ingest-bronze` ([ingest.py](src/credit_risk/ingest.py)) | Ingesta **incremental**: solo las entregas que no están en la tabla de control. Parquet particionado por `fecha_entrega`, tipos fijados por un contrato de esquema ([esquemas_bronze.json](src/credit_risk/esquemas_bronze.json)), columnas `_ingested_at` y `_source_file`. Atómica e idempotente. |
 | **Staging** | dbt, vistas | Limpieza sin cambiar la granularidad: el centinela `365243` de las columnas `DAYS_*` y el código `XNA` pasan a `NULL`. |
 | **Intermediate** | dbt, tablas **incrementales** | Agregación del historial a una fila por cliente (media, máximo, mínimo, suma y proporción de cada categoría). Las columnas numéricas se descubren por introspección; las categorías salen de un contrato fijo (*seed*). Cada ejecución solo recalcula los clientes con datos nuevos. |
@@ -129,14 +129,23 @@ ingesta publica datos nuevos en bronze.
 
 ```mermaid
 flowchart LR
-    subgraph org["DAG credit_risk_origen · manual"]
-        v[verify_data] --> s[simulate_source]
+    subgraph org["DAG credit_risk_origen · manual (simula al banco)"]
+        v[verify_data] --> g[generar_almacen] --> x[exportar_ficheros]
     end
+    almacen[("Almacén del banco")]
+    api(["API REST del origen<br/>FastAPI · servicio api-origen"])
     landing[("Landing zone<br/>fecha=AAAA-MM-DD")]
     subgraph ing["DAG credit_risk_ingesta · @daily, catchup"]
-        e["esperar_entrega<br/>(sensor)"] --> i["ingest_bronze<br/>--fecha {{ ds }}"] --> pb[publicar_bronze]
+        c{elegir_canal} --> e["esperar_entrega<br/>(sensor)"]
+        c --> a["extraer_api<br/>(paginación, reintentos)"]
+        e --> i["ingest_bronze<br/>--fecha {{ ds }}"]
+        a --> i
+        i --> pb[publicar_bronze]
     end
-    s --> landing -.-> e
+    g --> almacen --> api
+    x --> landing -.-> e
+    api -. HTTP .-> a
+    a --> landing
     bronze[("Asset<br/>home_credit_bronze")]
     subgraph tr["DAG credit_risk_transformacion · schedule = Asset bronze"]
         r[resolver_datos] --> f[dbt_source_freshness] --> d["dbt<br/>(Cosmos: 1 tarea por modelo)"] --> pm[publicar_mart]
@@ -151,8 +160,16 @@ flowchart LR
   día X (`{{ ds }}`), así que relanzar una ejecución (*Clear*) o hacer un
   *backfill* de un rango reprocesa exactamente esos días. Con `catchup=True`, al
   activar el DAG se crea una ejecución por cada día del periodo simulado.
-- **Sensor:** `esperar_entrega` comprueba cada 30 s que la entrega del día esté
-  completa y, mientras espera, libera su hueco (`mode="reschedule"`).
+- **Dos canales de entrada** (parámetro `canal`, bifurcación con `@task.branch`):
+  - `ficheros`: el sensor `esperar_entrega` comprueba cada 30 s que el origen
+    haya dejado la entrega completa y, mientras espera, libera su hueco
+    (`mode="reschedule"`).
+  - `api`: [`extract-api`](src/credit_risk/extract_api.py) descarga la entrega
+    de la [API del origen](src/credit_risk/api_origen.py) (FastAPI, clave en
+    `X-API-Key`, paginación por cursor) con reintentos ante 429/5xx (*backoff*
+    exponencial con *jitter*, respetando `Retry-After`) y verificando el total de
+    filas. Deja la entrega en la *landing* con el mismo contrato, así que el resto
+    del pipeline no cambia. La API simula un 5 % de fallos para ejercitar los reintentos.
 - **Assets con metadatos:** el evento de bronze lleva qué conjunto se ingirió
   (`muestra` o `completo`); la transformación lo lee y procesa ese mismo conjunto.
   Cada conjunto tiene su propio lago, así una prueba nunca pisa los datos completos.
@@ -218,15 +235,17 @@ en `<DATA_DIR>/raw/`, define `DATA_DIR` en `.env` y ejecuta los mismos comandos
 ### Airflow
 
 ```bash
-docker compose up -d --build    # Postgres + Airflow (api-server, scheduler, dag-processor)
+docker compose up -d --build    # Postgres + Airflow + API del origen (api-origen)
 ```
 
 Abre http://localhost:8080 (sin usuario: configuración solo para uso local),
-lanza `credit_risk_origen` (genera las entregas en la *landing zone*) y activa
+lanza `credit_risk_origen` (genera las entregas del "banco": las sirve la API en
+http://localhost:8000/docs y deja una copia en la *landing zone*) y activa
 `credit_risk_transformacion` y `credit_risk_ingesta`: la ingesta procesa los 30
 días uno a uno y cada día dispara la transformación. Por defecto se usa la
 muestra; para los datos completos, lanza el origen con `datos = completo` y un
-*backfill* de la ingesta con el mismo parámetro. Para pararlo:
+*backfill* de la ingesta con el mismo parámetro. Con `canal = api`, la ingesta
+extrae las entregas de la API en lugar de esperar los ficheros. Para pararlo:
 `docker compose down` (los volúmenes con el lago y el historial se conservan).
 
 Compose lee `DATA_DIR` del archivo `.env`; con `datos = muestra` no hacen falta

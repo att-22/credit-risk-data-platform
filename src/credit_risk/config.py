@@ -31,6 +31,15 @@ BRONZE_DIR = LAKE_DIR / "bronze"
 # antes de que la ingesta los lleve a bronze. Ver simulate_source.py.
 LANDING_DIR = Path(os.getenv("LANDING_DIR", LAKE_DIR / "landing"))
 
+# Sistema origen simulado (Fase 3.5): el "banco" guarda sus entregas en
+# ORIGEN_RAIZ/<conjunto>/fecha=AAAA-MM-DD/ y las sirve por una API REST
+# (api_origen.py). Nuestra extracción (extract_api.py) la consulta en ORIGEN_API_URL.
+ORIGEN_RAIZ = Path(os.getenv("ORIGEN_RAIZ", LAKE_DIR / "origen"))
+ORIGEN_API_URL = os.getenv("ORIGEN_API_URL", "http://localhost:8000")
+# Clave de la API. Por defecto una de desarrollo; en un despliegue real vendría
+# de un gestor de secretos, nunca del código.
+ORIGEN_API_KEY = os.getenv("ORIGEN_API_KEY", "clave-solo-para-desarrollo")
+
 # Salidas generadas por este proyecto (por defecto, ./outputs del repositorio).
 # También configurable: instalado como paquete (p. ej. en Docker), ROOT ya no
 # apunta al repositorio y hay que indicar la carpeta desde fuera.

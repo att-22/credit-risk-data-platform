@@ -26,6 +26,7 @@ Reglas:
 Uso:
     uv run simulate-source                       # 30 días desde 2026-09-01
     uv run simulate-source --inicio 2026-10-01 --dias 7
+    uv run simulate-source --destino lake/origen/completo   # almacén del "banco" (API)
 """
 
 from __future__ import annotations
@@ -143,15 +144,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--inicio", type=date.fromisoformat, default=INICIO)
     parser.add_argument("--dias", type=int, default=DIAS)
+    parser.add_argument(
+        "--destino",
+        type=Path,
+        default=LANDING_DIR,
+        help="carpeta de salida (por defecto, la landing)",
+    )
     args = parser.parse_args()
 
     print(f"Origen:  {RAW_DIR}")
-    print(f"Destino: {LANDING_DIR}  ({args.dias} días desde {args.inicio})\n")
+    print(f"Destino: {args.destino}  ({args.dias} días desde {args.inicio})\n")
     inicio = time.perf_counter()
-    filas = simular_origen(RAW_DIR, LANDING_DIR, args.inicio, args.dias)
+    filas = simular_origen(RAW_DIR, args.destino, args.inicio, args.dias)
     for nombre, n in filas.items():
         print(f"[OK] {nombre:<22} {n:>12,} filas")
-    entregas = sorted(p.name for p in LANDING_DIR.glob("fecha=*"))
+    entregas = sorted(p.name for p in args.destino.glob("fecha=*"))
     print(f"\n{len(entregas)} entregas ({entregas[0]} ... {entregas[-1]})")
     print(f"Completado en {time.perf_counter() - inicio:.1f} s")
 

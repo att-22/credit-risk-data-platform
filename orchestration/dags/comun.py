@@ -28,6 +28,13 @@ MART = Asset(name="mart_scoring__clientes", group="credit_risk")
 
 DATOS_VALIDOS = ["muestra", "completo"]
 
+# Canales por los que llega una entrega: ficheros que el origen deja en la landing
+# zone, o la API REST del origen (servicio api-origen), de la que se extraen.
+CANALES = ["ficheros", "api"]
+
+# Almacén del "banco" (lo sirve la API): ORIGEN_RAIZ/<conjunto>/fecha=AAAA-MM-DD/
+ORIGEN_RAIZ = Path("/opt/airflow/lake/origen")
+
 # Periodo de entregas que genera el sistema origen simulado (simulate-source:
 # 30 días desde el 1 de septiembre). La ingesta diaria se programa en ese rango.
 PRIMERA_ENTREGA = datetime(2026, 9, 1)
