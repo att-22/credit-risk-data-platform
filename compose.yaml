@@ -268,6 +268,23 @@ services:
     stop_grace_period: 30s
     restart: always
 
+  # Spark 4.2 (con Java 17) para los trabajos de spark_jobs/. Perfil "spark": no
+  # arranca con `docker compose up`; se ejecuta bajo demanda, p. ej.:
+  #   docker compose run --rm --service-ports spark spark-submit /opt/spark-jobs/agregados.py
+  # Lee y escribe en ./lake (el lago local); la Spark UI queda en http://localhost:4040.
+  spark:
+    profiles: ["spark"]
+    build: ./spark
+    image: credit-risk-spark:local
+    environment:
+      SPARK_JOBS_DIR: /opt/spark-jobs  # dónde buscan los tests los trabajos montados
+    volumes:
+      - ./spark_jobs:/opt/spark-jobs:ro
+      - ./tests/spark:/opt/spark-tests:ro
+      - ./lake:/opt/lake
+    ports:
+      - "4040:4040"
+
 volumes:
   postgres-db:
   airflow-logs:
