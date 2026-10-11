@@ -1,0 +1,125 @@
+# ==========================================================================
+# Airflow en local con Docker Compose
+# ==========================================================================
+# Versión reducida del docker-compose.yaml oficial de Airflow 3.3.2:
+# LocalExecutor (las tareas se ejecutan como procesos dentro del scheduler) en
+# lugar de CeleryExecutor (workers + Redis), que solo compensa con varias máquinas.
+#
+# Uso (desde la raíz del repositorio):
+#   docker compose up -d --build     # construir la imagen y arrancar
+#   http://localhost:8080            # interfaz web
+#   docker compose down              # parar (los volúmenes se conservan)
+#
+# Compose lee DATA_DIR del archivo .env de la raíz (el mismo que usa Python).
+
+# Configuración común a todos los servicios de Airflow (ancla YAML &airflow-common;
+# cada servicio la reutiliza con <<: *airflow-common).
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: orchestration/Dockerfile
+  image: credit-risk-airflow:local
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    # Base de datos de metadatos de Airflow (DAGs, ejecuciones, estados...)
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    # En Airflow 3 las tareas informan de su estado a través de la API
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    # Secreto compartido para firmar los tokens entre componentes (solo uso local)
+    # (64+ caracteres: lo mínimo recomendado para firmar con SHA-512)
+    AIRFLOW__API_AUTH__JWT_SECRET: credit-risk-secreto-solo-para-uso-local-no-usar-en-produccion-0123456789
+    # Sin pantalla de login: todo el que entra es administrador (solo uso local)
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+  volumes:
+    # DAGs: carpeta del repo montada en vivo (los cambios se ven sin reconstruir)
+    - ./orchestration/dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+    # Lago de datos de Airflow: volumen de Docker, separado de ./lake
+    - lake:/opt/airflow/lake
+    # Datos de Kaggle, solo lectura
+    - ${DATA_DIR:?Define DATA_DIR en el archivo .env}:/data:ro
+  depends_on: &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # Se ejecuta una vez al arrancar: crea/actualiza las tablas de Airflow y termina.
+  airflow-init:
+    <<: *airflow-common
+    command: version
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "true"
+
+  # Interfaz web y API (Airflow 3 sustituye el antiguo "webserver" por "api-server")
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Decide qué tareas toca ejecutar y, con LocalExecutor, las ejecuta
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Lee los archivos de dags/ y los convierte en DAGs (en Airflow 3 es un proceso aparte)
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-db:
+  airflow-logs:
+  lake:
