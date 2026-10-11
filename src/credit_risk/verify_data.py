@@ -48,7 +48,7 @@ def main() -> None:
         raise SystemExit(1)
 
     # Las salidas van al repositorio, nunca a la carpeta de datos de entrada.
-    OUTPUTS_DIR.mkdir(exist_ok=True)
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     inventario = pd.DataFrame(filas_inventario)
     salida = OUTPUTS_DIR / "dimensiones.csv"
     inventario.to_csv(salida, index=False)

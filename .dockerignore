@@ -19,8 +19,19 @@ __pycache__/
 # Datos y salidas: se montan desde fuera al ejecutar, no se meten en la imagen
 data/
 outputs/
+lake/
 *.csv
 *.parquet
 
-# Tests: no hacen falta para ejecutar la aplicación
+# Artefactos de dbt: la imagen ejecuta `dbt deps` y genera los suyos
+transform/target/
+transform/logs/
+transform/dbt_packages/
+
+# Tests: no hacen falta para ejecutar la aplicación...
 tests/
+# ...salvo la muestra sintética, que la imagen de Airflow usa para ejecuciones rápidas
+!tests/fixtures/muestra/raw/*.csv
+
+# Archivos locales
+CONTEXTO_SESION.md
