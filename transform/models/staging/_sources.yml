@@ -7,6 +7,12 @@ sources:
     config:
       # dbt-duckdb: cada tabla se lee del Parquet con su nombre ({name}).
       external_location: "{{ env_var('LAKE_DIR', '../lake') }}/bronze/{name}.parquet"
+      # Frescura: `dbt source freshness` mira el valor máximo de esta columna
+      # (la escribe ingest.py) y avisa si la última ingesta es demasiado antigua.
+      loaded_at_field: _INGESTED_AT
+      freshness:
+        warn_after: {count: 7, period: day}
+        error_after: {count: 30, period: day}
     tables:
       - name: application_train
         description: "Solicitudes actuales con la variable objetivo TARGET."
