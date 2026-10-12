@@ -354,11 +354,13 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Instalar Python y las dependencias (con el grupo ml)
-        run: uv sync --locked --group ml
+      - name: Instalar Python y las dependencias (con los grupos ml y panel)
+        run: uv sync --locked --group ml --group panel
 
-      - name: Tests del entrenamiento, la puntuación y la deriva
-        run: uv run pytest tests/test_modelo.py tests/test_scoring.py tests/test_deriva.py
+      - name: Tests del entrenamiento, la puntuación, la deriva y el panel
+        run: >
+          uv run pytest tests/test_modelo.py tests/test_scoring.py tests/test_deriva.py
+          tests/test_panel.py
 
       - name: Construir el mart sobre la muestra
         run: |

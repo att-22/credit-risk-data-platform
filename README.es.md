@@ -15,7 +15,7 @@ orquestado y desplegable.
 dbt_expectations) · Apache Airflow 3 · astronomer-cosmos · FastAPI · httpx ·
 Redpanda (Kafka) · confluent-kafka · PostgreSQL · Debezium · Apache Spark
 (PySpark) · Delta Lake · pytest · ruff · pre-commit · GitHub Actions ·
-Docker / Docker Compose
+Docker / Docker Compose · Terraform · LightGBM · MLflow · Streamlit
 
 ## Estado
 
@@ -26,6 +26,40 @@ Docker / Docker Compose
 - [x] Fase 4 — Spark, Delta Lake y Databricks
 - [x] Fase 5 — Cloud + Terraform + despliegue continuo (sobre AWS emulado; el despliegue a AWS real está listo pero desactivado)
 - [x] Fase 6 — La plataforma en uso: modelo de scoring sobre el mart, puntuación por lotes y monitorización de deriva
+
+## Panel
+
+Todo lo que produce la plataforma acaba en ficheros Parquet; el panel es donde se ve.
+Una aplicación de [Streamlit](https://streamlit.io) ([`panel/app.py`](panel/app.py))
+lee directamente del lago y responde a cinco preguntas, una por pestaña:
+
+| Pestaña | Pregunta | De dónde lee |
+|---|---|---|
+| Resumen | ¿Cómo está la plataforma hoy? | todo |
+| Datos | ¿Llegan los datos? Filas por día de entrega y por tabla | tabla de control de bronze |
+| Cartera | ¿Quién impaga más? Tasa de impago por contrato, estudios, edad, ingresos | el mart |
+| Modelo | ¿Es bueno el modelo? Comparación con el TFM, historial de entrenamientos, impago real por decil de riesgo | MLflow y el modelo vigente |
+| Puntuación y deriva | ¿Qué riesgo tienen las solicitudes nuevas y se siguen pareciendo a las del entrenamiento? | las puntuaciones y el informe de PSI |
+
+```bash
+uv run --group panel streamlit run panel/app.py     # http://localhost:8501
+```
+
+![Panel: resumen](docs/img/panel-resumen.png)
+
+La pestaña del modelo enseña por qué sirve la puntuación: la tasa de impago real va
+del **0,9 % en el decil de menos riesgo al 30,4 % en el de más**, unas 33 veces más.
+
+![Panel: modelo](docs/img/panel-modelo.png)
+
+La pestaña de deriva enseña la puntuación estable junto a la única variable que ha
+cambiado:
+
+![Panel: puntuación y deriva](docs/img/panel-deriva.png)
+
+Las consultas están en [`panel_datos.py`](src/credit_risk/panel_datos.py), separadas
+de la aplicación, y por eso se prueban con pytest; la aplicación se prueba sin
+navegador. Las capturas son con los datos completos.
 
 ## Arquitectura
 
@@ -531,6 +565,7 @@ En Git Bash (Windows) hay que anteponer `MSYS_NO_PATHCONV=1` a `docker run`.
 │   ├── core_bancario/         # esquema del Postgres del banco
 │   └── debezium/              # configuración de Debezium Server
 ├── spark/ · spark_jobs/   # imagen de Spark + Delta y trabajos de PySpark
+├── panel/                 # panel de Streamlit
 ├── infra/                 # Terraform: lago S3 y rol IAM en AWS (emulado con Moto)
 ├── compose.yaml           # todo el entorno local con Docker Compose
 ├── scripts/               # muestra sintética, contrato de esquema y comprobaciones de paridad
@@ -551,7 +586,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 - **CDC (Postgres + Debezium):** levanta Postgres, Debezium y Redpanda, captura un día de cambios y comprueba que la réplica de dbt es idéntica a Postgres.
 - **Terraform (AWS emulado):** ensaya el despliegue contra Moto: bootstrap (bucket del estado, proveedor OIDC, rol de despliegue), estado remoto con bloqueo, plan guardado y su `apply`, un segundo `plan` sin cambios, comprobaciones con boto3 de los recursos y de quién puede asumir el rol de despliegue, y `destroy`.
 - **Lago en S3 (AWS emulado):** Terraform crea el bucket en Moto y el pipeline corre sobre él: tests del acceso al lago contra S3, mismo bronze y mismo mart que en disco y paridad de la carga incremental sobre S3.
-- **Modelo:** tests del entrenamiento, la puntuación y la deriva, y una ejecución real sobre el mart construido con la muestra: entrenar, publicar el modelo, puntuar y vigilar la deriva.
+- **Modelo:** tests del entrenamiento, la puntuación, la deriva y el panel (la aplicación se ejecuta sin navegador), y una ejecución real sobre el mart construido con la muestra: entrenar, publicar el modelo, puntuar y vigilar la deriva.
 - **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.
 

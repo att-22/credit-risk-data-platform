@@ -304,6 +304,11 @@ def ejecutar(
         f"   (TFM: AUC {AUC_TFM:.4f})"
     )
 
+    probabilidad_prueba = puntuar(modelo.booster_, preparador, prueba)
+    cortes = np.quantile(probabilidad_prueba, np.arange(0.1, 1.0, 0.1))
+    decil_prueba = np.searchsorted(cortes, probabilidad_prueba, side="right") + 1
+    impago_prueba = prueba[TARGET].to_numpy()
+
     identificador = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     carpeta = modelos_dir / identificador
     resumen = {
@@ -318,11 +323,12 @@ def ejecutar(
         # Puntuaciones que separan los deciles en la prueba (10 %, 20 %... 90 %). Con
         # ellas se asigna un decil de riesgo al puntuar, y son la referencia para
         # detectar si la población que se puntúa cambia respecto a la del entrenamiento
-        "cortes_deciles": [
-            float(q)
-            for q in np.quantile(
-                puntuar(modelo.booster_, preparador, prueba), np.arange(0.1, 1.0, 0.1)
-            )
+        "cortes_deciles": cortes.tolist(),
+        # Tasa de impago REAL de cada decil en la prueba (del 1, menos riesgo, al 10):
+        # si el modelo ordena bien, crece de forma clara de un decil al siguiente
+        "impago_por_decil": [
+            float(impago_prueba[decil_prueba == d].mean()) if (decil_prueba == d).any() else None
+            for d in range(1, 11)
         ],
     }
     # Referencia para vigilar la deriva: cómo son, en el entrenamiento, las variables

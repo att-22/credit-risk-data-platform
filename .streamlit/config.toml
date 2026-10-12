@@ -1,0 +1,6 @@
+# Configuración del panel (panel/app.py)
+[client]
+toolbarMode = "minimal"   # sin el botón "Deploy" ni el menú de desarrollo
+
+[browser]
+gatherUsageStats = false  # no enviar estadísticas de uso a Streamlit
