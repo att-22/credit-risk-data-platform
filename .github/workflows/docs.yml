@@ -1,0 +1,72 @@
+# Publica la documentación de dbt (catálogo de modelos y grafo de linaje) en GitHub
+# Pages: https://att-22.github.io/credit-risk-data-platform/
+#
+# La genera dbt a partir del propio proyecto y de la muestra sintética: contiene
+# metadatos (modelos, columnas, SQL, tests), no datos.
+name: Documentación
+
+on:
+  push:
+    branches: [main]
+    paths: ["transform/**", ".github/workflows/docs.yml"]
+  workflow_dispatch:
+
+# Solo lo necesario para publicar en Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publicar:
+    name: dbt docs en GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.despliegue.outputs.page_url }}
+    env:
+      DATA_DIR: ${{ github.workspace }}/tests/fixtures/muestra
+      LAKE_DIR: ${{ github.workspace }}/lake
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v5
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Instalar Python y las dependencias
+        run: uv sync --locked
+
+      # El catálogo (columnas y tipos reales) sale de las tablas ya construidas
+      - name: Construir los modelos sobre la muestra
+        run: |
+          uv run simulate-source
+          uv run ingest-bronze
+          cd transform
+          uv run dbt deps
+          uv run dbt build
+
+      - name: Generar la documentación en un único fichero
+        working-directory: transform
+        run: |
+          uv run dbt docs generate --static
+          mkdir -p ../sitio
+          cp target/static_index.html ../sitio/index.html
+
+      - name: Preparar Pages
+        uses: actions/configure-pages@v6
+
+      - name: Subir el sitio
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: sitio
+
+      - name: Publicar
+        id: despliegue
+        uses: actions/deploy-pages@v5

@@ -228,6 +228,10 @@ def test_el_panel_completo_con_modelo_puntuaciones_y_deriva(lake):
     assert historial["modelo"].tolist() == [resumen["modelo"]]
     assert historial.loc[0, "auc"] == pytest.approx(resumen["auc"])
 
+    # Con 300 solicitudes el PSI no es fiable: el panel lo avisa en vez de dar un estado
+    assert any("el PSI no es fiable" in a.value for a in panel.warning)
+    assert any("no fiable" in t.value for t in panel.caption)
+
     # Consultar una solicitud puntuada enseña su decil
     panel.number_input[0].set_value(1_100_000).run()
     assert not panel.exception
