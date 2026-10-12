@@ -35,6 +35,7 @@ produce-events = "credit_risk.productor:main"
 consume-events = "credit_risk.consumidor:main"
 simulate-core = "credit_risk.simulate_core:main"
 consume-cdc = "credit_risk.cdc:main"
+train-model = "credit_risk.modelo:main"
 
 # Cómo convertir el código en un paquete instalable.
 [build-system]
@@ -49,6 +50,13 @@ dev = [
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "ruff>=0.17.0",
+]
+ml = [
+    "alembic>=1.20.0",
+    "lightgbm>=4.7.0",
+    "mlflow-skinny>=3.17.0",
+    "scikit-learn>=1.9.1",
+    "sqlalchemy>=2.1.4",
 ]
 spark = [
     "delta-spark==4.4.1",
