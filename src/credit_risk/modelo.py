@@ -43,6 +43,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from credit_risk import deriva
 from credit_risk.config import (
     KEY_CURR,
     LAKE_DIR,
@@ -225,13 +226,18 @@ def evaluar(modelo, preparador: Preparador, prueba: pd.DataFrame) -> dict[str, f
     }
 
 
-def guardar(modelo, preparador: Preparador, metricas: dict, carpeta: Path) -> None:
+def guardar(
+    modelo, preparador: Preparador, metricas: dict, referencia: dict, carpeta: Path
+) -> None:
     carpeta.mkdir(parents=True, exist_ok=True)
     # Formato de texto de LightGBM: portable entre versiones y sin ejecutar código al
     # cargarlo, a diferencia de pickle/joblib
     modelo.booster_.save_model(str(carpeta / FICHERO_MODELO))
     preparador.guardar(carpeta / FICHERO_PREPARADOR)
     (carpeta / FICHERO_METRICAS).write_text(json.dumps(metricas, indent=1), encoding="utf-8")
+    (carpeta / deriva.FICHERO_REFERENCIA).write_text(
+        json.dumps(referencia, indent=1), encoding="utf-8"
+    )
 
 
 def publicar(carpeta: Path, modelos_dir: Path) -> Path:
@@ -319,7 +325,13 @@ def ejecutar(
             )
         ],
     }
-    guardar(modelo, preparador, resumen, carpeta)
+    # Referencia para vigilar la deriva: cómo son, en el entrenamiento, las variables
+    # que más pesan (por ganancia: cuánto reducen el error los cortes que hace el modelo)
+    referencia = deriva.referencia(
+        preparador.transformar(entrenamiento),
+        modelo.booster_.feature_importance(importance_type="gain"),
+    )
+    guardar(modelo, preparador, resumen, referencia, carpeta)
 
     publicado = metricas["auc"] >= auc_minimo
     mlflow.set_tracking_uri(mlflow_uri)

@@ -3,11 +3,17 @@
     [Asset mart_scoring__clientes] ==>
                                        resolver_datos -> hay_modelo -> puntuar
     [Asset modelo_scoring]         ==>                  -> publicar_scoring ==> Asset scoring
+                                                        -> vigilar_deriva
 
 Cierra el ciclo de la plataforma sin intervención: cuando la transformación
 actualiza el mart (datos nuevos) o el entrenamiento publica un modelo (modelo
 nuevo), se vuelven a puntuar las solicitudes sin TARGET y el resultado queda en el
 lago (comando score), listo para quien decide sobre los créditos.
+
+Después de puntuar, `vigilar_deriva` compara lo puntuado con la población del
+entrenamiento (comando monitor-drift). Si la puntuación ha derivado más de
+`psi_maximo`, esa tarea falla: es la alarma. No bloquea la publicación de las
+puntuaciones, que ya están escritas; avisa de que hay que revisar el modelo.
 
 Si todavía no hay ningún modelo publicado, `hay_modelo` corta la ejecución (las
 tareas siguientes quedan omitidas, no fallidas): primero hay que lanzar
@@ -42,6 +48,12 @@ ENTORNO = entorno("ti.xcom_pull(task_ids='resolver_datos')")
             "muestra",
             enum=DATOS_VALIDOS,
             description="Solo para ejecuciones manuales (sin evento del mart o del modelo).",
+        ),
+        "psi_maximo": Param(
+            0.25,
+            type="number",
+            minimum=0,
+            description="PSI de la puntuación a partir del cual salta la alarma de deriva.",
         ),
     },
     # Repetirlo es seguro: puntuar con el mismo modelo sobrescribe su partición
@@ -82,13 +94,21 @@ def credit_risk_scoring():
         pool=POOL_DUCKDB,  # lee warehouse.duckdb
     )
 
+    vigilar_deriva = BashOperator(
+        task_id="vigilar_deriva",
+        bash_command=f"{BIN}/monitor-drift --psi-maximo {{{{ params.psi_maximo }}}}",
+        env=ENTORNO,
+        append_env=True,
+        pool=POOL_DUCKDB,  # lee warehouse.duckdb
+    )
+
     @task(outlets=[SCORING])
     def publicar_scoring(datos: str, outlet_events=None):
         """Registra que las puntuaciones están actualizadas."""
         outlet_events[SCORING].extra = {"datos": datos}
 
     datos = resolver_datos()
-    hay_modelo(datos) >> puntuar >> publicar_scoring(datos)
+    hay_modelo(datos) >> puntuar >> [publicar_scoring(datos), vigilar_deriva]
 
 
 credit_risk_scoring()

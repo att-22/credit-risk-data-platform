@@ -37,6 +37,7 @@ simulate-core = "credit_risk.simulate_core:main"
 consume-cdc = "credit_risk.cdc:main"
 train-model = "credit_risk.modelo:main"
 score = "credit_risk.scoring:main"
+monitor-drift = "credit_risk.deriva:main"
 
 # Cómo convertir el código en un paquete instalable.
 [build-system]

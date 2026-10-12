@@ -235,8 +235,19 @@ def test_sin_modelo_no_se_puntua_ni_se_publica(dagbag):
     assert "puntuar" in publicar.upstream_task_ids
 
 
+def test_la_deriva_se_vigila_tras_puntuar_sin_bloquear_la_publicacion(dagbag):
+    dag = dagbag.dags[PUNTUACION]
+    vigilar = dag.get_task("vigilar_deriva")
+    assert "monitor-drift --psi-maximo {{ params.psi_maximo }}" in vigilar.bash_command
+    assert vigilar.upstream_task_ids == {"puntuar"}
+    # En paralelo a la publicación: una alarma no impide que las puntuaciones se publiquen
+    assert "vigilar_deriva" not in dag.get_task("publicar_scoring").upstream_task_ids
+    assert dag.params.get_param("psi_maximo").value == 0.25
+
+
 @pytest.mark.parametrize(
-    ("dag_id", "tarea"), [(ENTRENAMIENTO, "entrenar"), (PUNTUACION, "puntuar")]
+    ("dag_id", "tarea"),
+    [(ENTRENAMIENTO, "entrenar"), (PUNTUACION, "puntuar"), (PUNTUACION, "vigilar_deriva")],
 )
 def test_las_tareas_del_modelo_leen_el_almacen_con_el_pool(dagbag, dag_id, tarea):
     assert dagbag.dags[dag_id].get_task(tarea).pool == POOL_DUCKDB
