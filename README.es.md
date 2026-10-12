@@ -25,7 +25,7 @@ Docker / Docker Compose
 - [x] Fase 3 — Ingesta realista: incremental, API, streaming y CDC
 - [x] Fase 4 — Spark, Delta Lake y Databricks
 - [x] Fase 5 — Cloud + Terraform + despliegue continuo (sobre AWS emulado; el despliegue a AWS real está listo pero desactivado)
-- [ ] Fase 6 — La plataforma en uso: modelo de scoring sobre el mart, puntuación por lotes y monitorización (en curso: entrenamiento hecho)
+- [ ] Fase 6 — La plataforma en uso: modelo de scoring sobre el mart, puntuación por lotes y monitorización (en curso: entrenamiento y puntuación por lotes hechos)
 
 ## Arquitectura
 
@@ -186,7 +186,7 @@ flowchart LR
   que las tareas que lo usan se ejecutan de una en una.
 - **Imagen propia:** Airflow y el proyecto (dbt, pandas...) viven en entornos
   virtuales separados dentro de la imagen para que sus dependencias no choquen.
-- **Tests de los DAGs en la CI:** 35 tests que cargan los DAGs dentro de la
+- **Tests de los DAGs en la CI:** 50 tests que cargan los DAGs dentro de la
   imagen de Airflow y comprueban su estructura (Assets, pool, una tarea por
   modelo del manifest, reintentos, comandos existentes en la imagen...).
 
@@ -380,6 +380,30 @@ uv run --group ml train-model --auc-minimo 0.78
 uvx mlflow ui --backend-store-uri sqlite:///outputs/mlflow.db --port 5001
 ```
 
+### Puntuación por lotes
+
+[`scoring.py`](src/credit_risk/scoring.py) aplica el modelo vigente a las 48.744
+solicitudes del mart que aún no tienen resultado y escribe en el lago
+(`warehouse/scoring/modelo=<id>/`) la probabilidad que les da el modelo y un decil de
+riesgo, calculado con los cortes que se guardaron al entrenar. Una partición por
+modelo: volver a puntuar con el mismo la sobrescribe, y un modelo nuevo conserva las
+puntuaciones del anterior para poder compararlas.
+
+```bash
+uv run --group ml score      # 48.744 solicitudes en unos 8 segundos
+```
+
+En Airflow esto cierra el ciclo sin pasos manuales. `credit_risk_scoring` se programa
+sobre **cualquiera de dos Assets**: el mart (datos nuevos) o el modelo (un modelo
+nuevo publicado por `credit_risk_entrenamiento`, que se lanza a mano). Si todavía no
+hay ningún modelo publicado, la ejecución se omite en lugar de fallar.
+
+```
+ingesta ==> bronze ==> transformación ==> mart ==>
+                                                   scoring ==> puntuaciones
+                    entrenamiento (manual) ==> modelo ==>
+```
+
 ## Hallazgos sobre los datos
 
 - **Centinela 365243** (= 1000 años) significa "sin dato" en 6 columnas
@@ -470,7 +494,8 @@ En Git Bash (Windows) hay que anteponer `MSYS_NO_PATHCONV=1` a `docker run`.
 │   └── tests/                 # tests singulares
 ├── orchestration/         # Airflow y servicios del "banco" simulado
 │   ├── Dockerfile             # imagen de Airflow + Cosmos + el proyecto (venv aparte)
-│   ├── dags/                  # DAGs de origen, ingesta, transformación, eventos y core
+│   ├── dags/                  # DAGs de origen, ingesta, transformación, eventos, core,
+│   │                          #   entrenamiento y puntuación
 │   ├── tests/                 # tests de integridad de los DAGs
 │   ├── core_bancario/         # esquema del Postgres del banco
 │   └── debezium/              # configuración de Debezium Server
@@ -495,7 +520,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 - **CDC (Postgres + Debezium):** levanta Postgres, Debezium y Redpanda, captura un día de cambios y comprueba que la réplica de dbt es idéntica a Postgres.
 - **Terraform (AWS emulado):** ensaya el despliegue contra Moto: bootstrap (bucket del estado, proveedor OIDC, rol de despliegue), estado remoto con bloqueo, plan guardado y su `apply`, un segundo `plan` sin cambios, comprobaciones con boto3 de los recursos y de quién puede asumir el rol de despliegue, y `destroy`.
 - **Lago en S3 (AWS emulado):** Terraform crea el bucket en Moto y el pipeline corre sobre él: tests del acceso al lago contra S3, mismo bronze y mismo mart que en disco y paridad de la carga incremental sobre S3.
-- **Modelo:** tests del entrenamiento y un entrenamiento real sobre el mart construido con la muestra, que publica el modelo.
+- **Modelo:** tests del entrenamiento y de la puntuación, y una ejecución real sobre el mart construido con la muestra: entrenar, publicar el modelo y puntuar.
 - **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.
 

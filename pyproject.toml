@@ -36,6 +36,7 @@ consume-events = "credit_risk.consumidor:main"
 simulate-core = "credit_risk.simulate_core:main"
 consume-cdc = "credit_risk.cdc:main"
 train-model = "credit_risk.modelo:main"
+score = "credit_risk.scoring:main"
 
 # Cómo convertir el código en un paquete instalable.
 [build-system]

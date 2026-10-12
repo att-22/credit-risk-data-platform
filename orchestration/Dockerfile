@@ -22,6 +22,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /usr/local/bin/uv
 
 USER root
 
+# libgomp: la librería de paralelismo (OpenMP) que LightGBM necesita para cargarse
+RUN apt-get update     && apt-get install -y --no-install-recommends libgomp1     && rm -rf /var/lib/apt/lists/*
+
 # UV_PROJECT_ENVIRONMENT: dónde crear el entorno virtual del proyecto.
 # UV_PYTHON + UV_PYTHON_DOWNLOADS=never: usar el Python 3.13 de la imagen.
 ENV UV_PROJECT_ENVIRONMENT=/opt/credit-risk/.venv \
@@ -32,14 +35,15 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/credit-risk/.venv \
 
 WORKDIR /opt/credit-risk
 
-# 1) Dependencias (capa cacheada mientras no cambie uv.lock)
+# 1) Dependencias (capa cacheada mientras no cambie uv.lock). El grupo ml añade
+#    LightGBM, scikit-learn y MLflow: los DAGs de entrenamiento y puntuación.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --no-install-project
+RUN uv sync --locked --no-dev --group ml --no-install-project
 
 # 2) Nuestro paquete
 COPY README.md ./
 COPY src ./src
-RUN uv sync --locked --no-dev --no-editable
+RUN uv sync --locked --no-dev --group ml --no-editable
 
 # 3) Proyecto dbt con sus paquetes ya descargados (las tareas no necesitan internet).
 #    `dbt parse` genera target/manifest.json: Cosmos lo lee para crear una tarea

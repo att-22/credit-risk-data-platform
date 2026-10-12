@@ -200,12 +200,22 @@ def entrenar(
     return modelo, preparador, arboles
 
 
+def puntuar(booster, preparador: Preparador, datos: pd.DataFrame) -> np.ndarray:
+    """Probabilidad de impago que el modelo asigna a cada fila.
+
+    Sirve para ordenar las solicitudes por riesgo, no como probabilidad real: el
+    modelo se entrena con las clases equilibradas (class_weight), así que la cifra
+    está inflada respecto a la tasa de impago verdadera (~8 %).
+    """
+    return booster.predict(preparador.transformar(datos))
+
+
 def evaluar(modelo, preparador: Preparador, prueba: pd.DataFrame) -> dict[str, float]:
     """AUC, Gini y KS sobre datos que el modelo no ha visto."""
     from sklearn.metrics import roc_auc_score, roc_curve
 
     y = prueba[TARGET].astype("int8")
-    probabilidad = modelo.predict_proba(preparador.transformar(prueba))[:, 1]
+    probabilidad = puntuar(modelo.booster_, preparador, prueba)
     auc = float(roc_auc_score(y, probabilidad))
     falsos, verdaderos, _ = roc_curve(y, probabilidad)
     return {
@@ -234,12 +244,31 @@ def publicar(carpeta: Path, modelos_dir: Path) -> Path:
     return vigente
 
 
+def cargar_vigente(modelos_dir: Path = MODELS_DIR) -> tuple[object, Preparador, dict]:
+    """El modelo publicado, su preparador y sus métricas (para puntuar con él)."""
+    import lightgbm
+
+    vigente = modelos_dir / VIGENTE
+    if not (vigente / FICHERO_MODELO).exists():
+        raise FileNotFoundError(
+            f"No hay modelo vigente en {vigente}: entrena antes con `train-model`."
+        )
+    return (
+        lightgbm.Booster(model_file=str(vigente / FICHERO_MODELO)),
+        Preparador.cargar(vigente / FICHERO_PREPARADOR),
+        json.loads((vigente / FICHERO_METRICAS).read_text(encoding="utf-8")),
+    )
+
+
 def _commit() -> str:
     """Commit del código con el que se entrena (vacío fuera de un repositorio)."""
-    resultado = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True
-    )
-    return resultado.stdout.strip()
+    try:
+        resultado = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True
+        )
+    except OSError:  # no hay git (p. ej. dentro de la imagen de Airflow)
+        return ""
+    return resultado.stdout.strip() if resultado.returncode == 0 else ""
 
 
 def ejecutar(
@@ -280,6 +309,15 @@ def ejecutar(
         "modelo": identificador,
         "commit": _commit(),
         **version_datos,
+        # Puntuaciones que separan los deciles en la prueba (10 %, 20 %... 90 %). Con
+        # ellas se asigna un decil de riesgo al puntuar, y son la referencia para
+        # detectar si la población que se puntúa cambia respecto a la del entrenamiento
+        "cortes_deciles": [
+            float(q)
+            for q in np.quantile(
+                puntuar(modelo.booster_, preparador, prueba), np.arange(0.1, 1.0, 0.1)
+            )
+        ],
     }
     guardar(modelo, preparador, resumen, carpeta)
 

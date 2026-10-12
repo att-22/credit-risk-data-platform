@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 from airflow.dag_processing.dagbag import DagBag
-from comun import BRONZE, FICHEROS_ENTREGA, MART
+from comun import BRONZE, FICHEROS_ENTREGA, MART, MODELO, POOL_DUCKDB, SCORING
 
 DAGS_DIR = Path("/opt/airflow/dags")
 MANIFEST = Path("/opt/credit-risk/transform/target/manifest.json")
@@ -26,9 +26,11 @@ INGESTA = "credit_risk_ingesta"
 TRANSFORMACION = "credit_risk_transformacion"
 EVENTOS = "credit_risk_eventos"
 CORE = "credit_risk_core"
-TODOS = [ORIGEN, INGESTA, TRANSFORMACION, EVENTOS, CORE]
+ENTRENAMIENTO = "credit_risk_entrenamiento"
+PUNTUACION = "credit_risk_scoring"
+TODOS = [ORIGEN, INGESTA, TRANSFORMACION, EVENTOS, CORE, ENTRENAMIENTO, PUNTUACION]
 # Todos reintentan menos el de eventos: reintentarlo republicaría el día entero
-CON_REINTENTOS = [ORIGEN, INGESTA, TRANSFORMACION, CORE]
+CON_REINTENTOS = [ORIGEN, INGESTA, TRANSFORMACION, CORE, ENTRENAMIENTO, PUNTUACION]
 
 
 @pytest.fixture(scope="module")
@@ -55,7 +57,7 @@ def tareas_duckdb(transformacion):
 
 def test_los_dags_se_importan_sin_errores(dagbag):
     assert dagbag.import_errors == {}
-    # comun.py está en .airflowignore: solo hay los tres DAGs
+    # comun.py está en .airflowignore: solo están los DAGs de verdad
     assert set(dagbag.dag_ids) == set(TODOS)
 
 
@@ -196,6 +198,58 @@ def test_el_core_simula_la_actividad_del_dia_elegido(dagbag):
     assert "simulate-core --fecha {{ params.fecha }} --conjunto {{ params.datos }}" in (
         simular.bash_command
     )
+
+
+# --- Modelo: entrenamiento y puntuación ------------------------------------------
+
+
+def test_el_entrenamiento_es_manual_y_publica_el_modelo(dagbag):
+    dag = dagbag.dags[ENTRENAMIENTO]
+    assert type(dag.timetable).__name__ == "NullTimetable"  # schedule=None
+    publicar = dag.get_task("publicar_modelo")
+    assert MODELO in publicar.outlets
+    # Solo se publica si entrenar termina bien (un AUC insuficiente lo hace fallar)
+    assert publicar.upstream_task_ids == {"entrenar"}
+
+
+def test_el_entrenamiento_exige_el_auc_minimo_y_abrevia_con_la_muestra(dagbag):
+    comando = dagbag.dags[ENTRENAMIENTO].get_task("entrenar").bash_command
+    assert "train-model --auc-minimo {{ params.auc_minimo }}" in comando
+    assert "'--prueba' if params.datos == 'muestra'" in comando
+
+
+def test_la_puntuacion_se_programa_con_el_mart_o_con_el_modelo(dagbag):
+    dag = dagbag.dags[PUNTUACION]
+    assert type(dag.timetable).__name__ == "AssetTriggeredTimetable"
+    condicion = dag.timetable.asset_condition
+    assert type(condicion).__name__ == "AssetAny"  # cualquiera de los dos, no ambos
+    assert set(condicion.objects) == {MART, MODELO}
+
+
+def test_sin_modelo_no_se_puntua_ni_se_publica(dagbag):
+    dag = dagbag.dags[PUNTUACION]
+    assert type(dag.get_task("hay_modelo")).__name__ == "_ShortCircuitDecoratedOperator"
+    assert dag.get_task("puntuar").upstream_task_ids == {"hay_modelo"}
+    publicar = dag.get_task("publicar_scoring")
+    assert SCORING in publicar.outlets
+    assert "puntuar" in publicar.upstream_task_ids
+
+
+@pytest.mark.parametrize(
+    ("dag_id", "tarea"), [(ENTRENAMIENTO, "entrenar"), (PUNTUACION, "puntuar")]
+)
+def test_las_tareas_del_modelo_leen_el_almacen_con_el_pool(dagbag, dag_id, tarea):
+    assert dagbag.dags[dag_id].get_task(tarea).pool == POOL_DUCKDB
+
+
+def test_las_librerias_del_modelo_cargan_en_la_imagen():
+    # LightGBM necesita libgomp del sistema: sin ella se instala pero no se puede importar
+    resultado = subprocess.run(
+        ["/opt/credit-risk/.venv/bin/python", "-c", "import lightgbm, sklearn, mlflow"],
+        capture_output=True,
+        text=True,
+    )
+    assert resultado.returncode == 0, resultado.stderr
 
 
 @pytest.mark.parametrize("dag_id", TODOS)

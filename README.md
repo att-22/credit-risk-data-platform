@@ -28,7 +28,7 @@ Docker / Docker Compose
 - [x] Phase 3 — Realistic ingestion: incremental loads, API, streaming and CDC
 - [x] Phase 4 — Spark, Delta Lake and Databricks
 - [x] Phase 5 — Cloud + Terraform + continuous deployment (on emulated AWS; the deployment to real AWS is ready but disabled)
-- [ ] Phase 6 — Putting the platform to use: scoring model on the mart, batch scoring and monitoring (in progress: training done)
+- [ ] Phase 6 — Putting the platform to use: scoring model on the mart, batch scoring and monitoring (in progress: training and batch scoring done)
 
 ## Architecture
 
@@ -190,7 +190,7 @@ flowchart LR
   tasks that use it run one at a time.
 - **Custom image:** Airflow and the project (dbt, pandas...) live in separate
   virtual environments inside the image so their dependencies never clash.
-- **DAG tests in CI:** 35 tests load the DAGs inside the Airflow image and check
+- **DAG tests in CI:** 50 tests load the DAGs inside the Airflow image and check
   their structure (Assets, pool, one task per manifest model, retries, commands
   present in the image...).
 
@@ -382,6 +382,30 @@ uv run --group ml train-model --auc-minimo 0.78
 uvx mlflow ui --backend-store-uri sqlite:///outputs/mlflow.db --port 5001
 ```
 
+### Batch scoring
+
+[`scoring.py`](src/credit_risk/scoring.py) applies the current model to the 48,744
+applications in the mart that have no outcome yet and writes the result to the lake
+(`warehouse/scoring/modelo=<id>/`): the probability the model assigns and a risk
+decile, computed with the cut-offs saved at training time. One partition per model:
+scoring again with the same model overwrites it, and a new model keeps the previous
+scores for comparison.
+
+```bash
+uv run --group ml score      # 48,744 applications in about 8 seconds
+```
+
+In Airflow this closes the loop with no manual step. `credit_risk_scoring` is
+scheduled on **either of two Assets**: the mart (new data) or the model (a new model
+published by `credit_risk_entrenamiento`, which is launched by hand). If no model has
+been published yet, the run is skipped rather than failed.
+
+```
+ingestion ==> bronze ==> transformation ==> mart ==>
+                                                     scoring ==> scores
+                          training (manual) ==> model ==>
+```
+
 ## Findings about the data
 
 - **Sentinel 365243** (= 1,000 years) means "no data" in 6 `DAYS_*` columns. In
@@ -471,7 +495,8 @@ In Git Bash (Windows), prefix `docker run` with `MSYS_NO_PATHCONV=1`.
 │   └── tests/                 # singular tests
 ├── orchestration/         # Airflow and the simulated "bank" services
 │   ├── Dockerfile             # Airflow image + Cosmos + the project (separate venv)
-│   ├── dags/                  # source, ingestion, transformation, events and core DAGs
+│   ├── dags/                  # source, ingestion, transformation, events, core,
+│   │                          #   training and scoring DAGs
 │   ├── tests/                 # DAG integrity tests
 │   ├── core_bancario/         # schema of the bank's Postgres
 │   └── debezium/              # Debezium Server configuration
@@ -496,7 +521,7 @@ On every PR, GitHub Actions runs in parallel:
 - **CDC (Postgres + Debezium):** starts Postgres, Debezium and Redpanda, captures a day of changes and checks that the dbt replica is identical to Postgres.
 - **Terraform (emulated AWS):** rehearses the deployment against Moto: bootstrap (state bucket, OIDC provider, deploy role), remote state with locking, a saved plan and its `apply`, a second `plan` with no changes, boto3 checks of the resources and of who can assume the deploy role, and `destroy`.
 - **Lake on S3 (emulated AWS):** Terraform creates the bucket in Moto and the pipeline runs on it: lake access tests against S3, same bronze and mart as on disk, and incremental-load parity on S3.
-- **Model:** tests of the training code and a real training run on the mart built from the sample, publishing the model.
+- **Model:** tests of the training and scoring code, and a real run on the mart built from the sample: train, publish the model and score.
 - **Airflow DAGs:** builds the Airflow image and runs the DAG integrity tests inside it.
 - **Docker build:** builds the image and runs a smoke test.
 
