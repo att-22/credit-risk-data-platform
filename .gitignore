@@ -51,3 +51,7 @@ infra/.terraform/
 *.tfstate
 *.tfstate.*
 *.tfplan
+
+# Estado remoto generado por infra/backend.sh (solo en la CI y el despliegue)
+infra/backend_override.tf
+infra/**/.terraform/

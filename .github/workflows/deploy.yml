@@ -1,0 +1,86 @@
+# Despliegue continuo de la infraestructura (infra/) en AWS real.
+#
+# DESACTIVADO hasta que exista la variable de repositorio AWS_DEPLOY_ROLE_ARN: sin
+# ella, el job se omite. Para activarlo, ver "Despliegue continuo" en infra/README.md.
+#
+# No hay claves de AWS guardadas en GitHub. En cada ejecución, GitHub firma un token
+# (OIDC) que dice "soy este repositorio, en el environment aws-dev"; AWS lo valida
+# contra la política de confianza del rol (infra/bootstrap/) y entrega credenciales
+# que caducan en una hora.
+name: Despliegue
+
+on:
+  # Despliegue continuo: cada cambio de la infraestructura que llega a main
+  push:
+    branches: [main]
+    paths: ["infra/**", ".github/workflows/deploy.yml"]
+  # Manual, desde la pestaña Actions: para ver un plan sin aplicar nada
+  workflow_dispatch:
+    inputs:
+      accion:
+        description: "plan = solo enseñar los cambios; apply = aplicarlos"
+        type: choice
+        options: [plan, apply]
+        default: plan
+
+permissions:
+  id-token: write   # permite pedir a GitHub el token OIDC
+  contents: read
+
+# Un solo despliegue a la vez por entorno; el segundo espera, no cancela al primero
+concurrency:
+  group: despliegue-aws-dev
+  cancel-in-progress: false
+
+jobs:
+  desplegar:
+    name: Terraform (AWS dev)
+    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    # El rol de AWS solo se deja asumir desde este environment, que en GitHub puede
+    # exigir la aprobación de una persona antes de que el job empiece
+    environment: aws-dev
+    env:
+      AWS_REGION: eu-west-1
+      VARS: -input=false -no-color -var-file=entornos/dev.tfvars
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v5
+
+      - name: Credenciales temporales de AWS por OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.5   # la misma que compose.yaml
+
+      - name: Estado remoto en S3
+        run: |
+          sh backend.sh "${{ vars.TF_STATE_BUCKET }}" dev
+          terraform init -input=false -lockfile=readonly
+
+      - name: Plan
+        run: terraform plan $VARS -out=despliegue.tfplan
+
+      # Se aplica exactamente el plan calculado arriba, no uno nuevo
+      - name: Apply
+        if: github.event_name == 'push' || inputs.accion == 'apply'
+        run: terraform apply -input=false -no-color despliegue.tfplan
+
+      - name: Instalar uv
+        if: github.event_name == 'push' || inputs.accion == 'apply'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Comprobar en AWS que los recursos son los declarados
+        if: github.event_name == 'push' || inputs.accion == 'apply'
+        working-directory: .
+        run: >
+          uv run --locked --group aws python scripts/comprobar_infra.py
+          --entorno dev --endpoint "" --dias-landing 7

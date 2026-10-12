@@ -224,13 +224,15 @@ jobs:
   terraform:
     name: Terraform (AWS emulado)
     runs-on: ubuntu-latest
-    # La infraestructura como código se prueba igual que el resto: formato,
-    # validación y un despliegue real contra Moto (AWS emulado), comprobando
-    # después con boto3 que los recursos son los declarados y que se destruyen.
+    # La infraestructura como código se prueba igual que el resto. Contra Moto (AWS
+    # emulado) se ensayan los mismos pasos que hace el despliegue real (deploy.yml):
+    # bootstrap, estado remoto en S3, plan guardado y apply de ese plan; y se
+    # comprueba con boto3 que los recursos son los declarados.
     env:
       DATA_DIR: ${{ github.workspace }}/tests/fixtures/muestra  # compose.yaml la exige
       TF: docker compose --profile aws run --rm -T terraform
       VARS: -input=false -no-color -var-file=entornos/local.tfvars
+      MOTO: -input=false -no-color -var endpoint_aws=http://moto:5000
     steps:
       - name: Descargar el código del repositorio
         uses: actions/checkout@v5
@@ -238,26 +240,40 @@ jobs:
       - name: Arrancar Moto (de compose.yaml)
         run: docker compose --profile aws up -d moto
 
-      - name: Formato y validación
-        run: |
-          $TF fmt -check -recursive -diff
-          $TF init -input=false -lockfile=readonly
-          $TF validate -no-color
-
-      - name: Desplegar en Moto
-        # Dos apply: Moto ignora las etiquetas que el proveedor manda al crear el
-        # bucket y el segundo las aplica (en AWS real basta con uno)
-        run: |
-          $TF apply $VARS -auto-approve
-          $TF apply $VARS -auto-approve
-
-      - name: Sin cambios pendientes (idempotencia)
-        run: $TF plan $VARS -detailed-exitcode
+      - name: Formato
+        run: $TF fmt -check -recursive -diff
 
       - name: Instalar uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+
+      - name: "Bootstrap: bucket del estado, proveedor OIDC y rol de despliegue"
+        run: |
+          $TF -chdir=bootstrap init -input=false -lockfile=readonly
+          $TF -chdir=bootstrap validate -no-color
+          $TF -chdir=bootstrap apply $MOTO -auto-approve
+          $TF -chdir=bootstrap apply $MOTO -auto-approve
+          $TF -chdir=bootstrap plan $MOTO -detailed-exitcode
+          uv run --locked --group aws python scripts/comprobar_infra.py --bootstrap
+
+      - name: Estado remoto en el bucket del bootstrap
+        run: |
+          sh infra/backend.sh "$($TF -chdir=bootstrap output -raw bucket_estado 2>/dev/null)" local http://moto:5000
+          $TF init -input=false -lockfile=readonly
+          $TF validate -no-color
+
+      - name: Desplegar en Moto el plan guardado
+        # Dos veces: Moto ignora las etiquetas que el proveedor manda al crear el
+        # bucket y la segunda las aplica (en AWS real basta con una)
+        run: |
+          for vuelta in 1 2; do
+            $TF plan $VARS -out=despliegue.tfplan
+            $TF apply -input=false -no-color despliegue.tfplan
+          done
+
+      - name: Sin cambios pendientes (idempotencia)
+        run: $TF plan $VARS -detailed-exitcode
 
       - name: Comprobar los recursos con boto3
         run: uv run --locked --group aws python scripts/comprobar_infra.py

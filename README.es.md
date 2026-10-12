@@ -24,7 +24,7 @@ Docker / Docker Compose
 - [x] Fase 2 — Orquestación con Airflow 3 (Cosmos, Assets, tests de DAGs)
 - [x] Fase 3 — Ingesta realista: incremental, API, streaming y CDC
 - [x] Fase 4 — Spark, Delta Lake y Databricks
-- [ ] Fase 5 — Cloud + Terraform + despliegue continuo (en curso: Terraform y el lago en S3, sobre AWS emulado, hechos)
+- [x] Fase 5 — Cloud + Terraform + despliegue continuo (sobre AWS emulado; el despliegue a AWS real está listo pero desactivado)
 
 ## Arquitectura
 
@@ -336,6 +336,15 @@ con `httpfs`, `pyarrow.fs` gestiona las carpetas con la misma API para disco y S
 sigue en local: almacenamiento y cómputo quedan separados.
 `scripts/comprobar_paridad_s3.py` ejecuta el pipeline entero dos veces, en disco y en
 S3, y exige el mismo bronze y el mismo mart, columna a columna.
+
+**Despliegue continuo.** [`deploy.yml`](.github/workflows/deploy.yml) aplica `infra/`
+en AWS real cuando un cambio de la infraestructura llega a `main`. No guarda claves
+de AWS: GitHub Actions obtiene credenciales de una hora por **OIDC**, de un rol que
+solo se deja asumir desde este repositorio y su environment `aws-dev`. El estado de
+Terraform vive en un bucket S3 con bloqueo y el workflow aplica exactamente el plan
+que ha calculado. Está desactivado hasta que se define una variable del repositorio;
+[`infra/bootstrap/`](infra/bootstrap) crea lo que necesita y la CI ensaya los mismos
+pasos contra Moto.
 [infra/README.md](infra/README.md) tiene los detalles, las rarezas de Moto
 encontradas por el camino y una tabla de equivalencias AWS / Google Cloud / Azure.
 
@@ -438,7 +447,7 @@ En Git Bash (Windows) hay que anteponer `MSYS_NO_PATHCONV=1` a `docker run`.
 ├── compose.yaml           # todo el entorno local con Docker Compose
 ├── scripts/               # muestra sintética, contrato de esquema y comprobaciones de paridad
 ├── tests/                 # tests de pytest (unitarios y de integración) y muestra de datos
-├── .github/workflows/     # CI: 11 jobs
+├── .github/workflows/     # CI (11 jobs) y despliegue a AWS
 └── Dockerfile             # imagen multi-stage del proyecto, usuario sin root
 ```
 
@@ -452,7 +461,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 - **Streaming (Redpanda):** arranca un broker y ejecuta los tests de integración del productor y el consumidor.
 - **Spark:** tests de los trabajos de PySpark y Delta Lake (con Java 17), paridad con dbt sobre la muestra y el notebook de Databricks en modo local.
 - **CDC (Postgres + Debezium):** levanta Postgres, Debezium y Redpanda, captura un día de cambios y comprueba que la réplica de dbt es idéntica a Postgres.
-- **Terraform (AWS emulado):** `fmt`, `validate`, `apply` contra Moto, un segundo `plan` sin cambios, comprobación de los recursos con boto3 y `destroy`.
+- **Terraform (AWS emulado):** ensaya el despliegue contra Moto: bootstrap (bucket del estado, proveedor OIDC, rol de despliegue), estado remoto con bloqueo, plan guardado y su `apply`, un segundo `plan` sin cambios, comprobaciones con boto3 de los recursos y de quién puede asumir el rol de despliegue, y `destroy`.
 - **Lago en S3 (AWS emulado):** Terraform crea el bucket en Moto y el pipeline corre sobre él: tests del acceso al lago contra S3, mismo bronze y mismo mart que en disco y paridad de la carga incremental sobre S3.
 - **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.
