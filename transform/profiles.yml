@@ -6,10 +6,31 @@
 # Cuando pasemos a la nube, las credenciales vendrán de variables de entorno.
 
 credit_risk:
-  target: dev            # entorno por defecto
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"   # entorno por defecto: dev
   outputs:
     dev:
       type: duckdb
       # Base de datos: un único archivo dentro del lago de datos.
       path: "{{ env_var('LAKE_DIR', '../lake') }}/warehouse.duckdb"
       threads: 4         # modelos que se pueden construir en paralelo
+
+    # Lago en S3 (Fase 5.2): bronze se lee de LAKE_URI=s3://... El almacén sigue en
+    # un fichero local: es el estado del motor de cálculo, no parte del lago.
+    # Credenciales: las variables estándar de AWS (en la CI, de mentira para Moto;
+    # en AWS real, temporales por OIDC). Nunca escritas aquí.
+    s3:
+      type: duckdb
+      path: "{{ env_var('LAKE_DIR', '../lake') }}/warehouse.duckdb"
+      threads: 4
+      extensions: [httpfs]
+      secrets:
+        - type: s3
+          key_id: "{{ env_var('AWS_ACCESS_KEY_ID') }}"
+          secret: "{{ env_var('AWS_SECRET_ACCESS_KEY') }}"
+          session_token: "{{ env_var('AWS_SESSION_TOKEN', '') }}"
+          region: "{{ env_var('AWS_REGION', 'eu-west-1') }}"
+          # Con un emulador (AWS_ENDPOINT_URL=http://localhost:5000): su host,
+          # sin TLS y con rutas host/bucket/clave. Sin él, AWS de verdad.
+          endpoint: "{{ env_var('AWS_ENDPOINT_URL', 'https://s3.amazonaws.com').split('://')[1] }}"
+          use_ssl: "{{ env_var('AWS_ENDPOINT_URL', 'https://').startswith('https') }}"
+          url_style: "{{ 'path' if env_var('AWS_ENDPOINT_URL', '') else 'vhost' }}"

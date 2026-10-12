@@ -265,6 +265,59 @@ jobs:
       - name: Destruir
         run: $TF destroy $VARS -auto-approve
 
+  lago-s3:
+    name: Lago en S3 (AWS emulado)
+    runs-on: ubuntu-latest
+    # El pipeline con el lago en S3: Terraform crea el bucket en Moto y después la
+    # landing y bronze viven en él. Se exige el mismo resultado que en disco.
+    env:
+      DATA_DIR: ${{ github.workspace }}/tests/fixtures/muestra
+      TF: docker compose --profile aws run --rm -T terraform
+      # Credenciales de mentira para Moto (con AWS real vendrían de OIDC)
+      AWS_ENDPOINT_URL: http://localhost:5000
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: eu-west-1
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v5
+
+      - name: Crear la infraestructura en Moto con Terraform
+        run: |
+          docker compose --profile aws up -d moto
+          $TF init -input=false -lockfile=readonly
+          $TF apply -input=false -no-color -auto-approve -var-file=entornos/local.tfvars
+          echo "LAGO=$($TF output -raw uri_lago 2>/dev/null)" >> "$GITHUB_ENV"
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Instalar Python y las dependencias
+        run: uv sync --locked
+
+      - name: Tests del acceso al lago, también contra S3
+        run: LAGO_S3_TEST=$LAGO uv run pytest tests/test_lago.py
+
+      - name: Instalar los paquetes de dbt
+        working-directory: transform
+        run: uv run dbt deps
+
+      - name: Mismo bronze y mismo mart con el lago en S3 que en disco
+        run: uv run python scripts/comprobar_paridad_s3.py --lago "$LAGO"
+
+      - name: Paridad de la carga incremental con el lago en S3
+        env:
+          DBT_TARGET: s3
+        run: |
+          export LAKE_URI=$LAGO LAKE_DIR=${{ github.workspace }}/lake
+          mkdir -p "$LAKE_DIR"
+          uv run simulate-source
+          uv run python scripts/comprobar_paridad_incremental.py
+      # Sin destroy: el runner se descarta, y Moto falla al vaciar un bucket
+      # versionado con objetos borrados (ver infra/README.md)
+
   airflow:
     name: Airflow DAGs
     runs-on: ubuntu-latest

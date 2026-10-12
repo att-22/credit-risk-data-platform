@@ -31,6 +31,14 @@ BRONZE_DIR = LAKE_DIR / "bronze"
 # antes de que la ingesta los lleve a bronze. Ver simulate_source.py.
 LANDING_DIR = Path(os.getenv("LANDING_DIR", LAKE_DIR / "landing"))
 
+# Lago en la nube (Fase 5.2): la landing y bronze pueden vivir en S3 en lugar de en
+# disco, p. ej. LAKE_URI=s3://credit-risk-local-lake-123456789012 (ver lago.py). Sin
+# ella, son las carpetas de LAKE_DIR. El almacén de dbt (warehouse.duckdb) sigue en
+# LAKE_DIR: es el estado del motor de cálculo, no parte del lago.
+LAKE_URI = os.getenv("LAKE_URI") or LAKE_DIR.as_posix()
+BRONZE_URI = f"{LAKE_URI.rstrip('/')}/bronze"
+LANDING_URI = os.getenv("LANDING_DIR") or f"{LAKE_URI.rstrip('/')}/landing"
+
 # Sistema origen simulado (Fase 3.5): el "banco" guarda sus entregas en
 # ORIGEN_RAIZ/<conjunto>/fecha=AAAA-MM-DD/ y las sirve por una API REST
 # (api_origen.py). Nuestra extracción (extract_api.py) la consulta en ORIGEN_API_URL.

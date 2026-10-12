@@ -7,9 +7,10 @@ sources:
     config:
       # dbt-duckdb: cada tabla ({name}) se lee de todas sus particiones diarias,
       # bronze/<tabla>/fecha_entrega=AAAA-MM-DD/data.parquet. hive_partitioning
-      # convierte la carpeta en la columna fecha_entrega (DATE).
+      # convierte la carpeta en la columna fecha_entrega (DATE). El lago puede
+      # estar en S3 (LAKE_URI=s3://..., con el target s3 de profiles.yml).
       external_location: >-
-        read_parquet('{{ env_var('LAKE_DIR', '../lake') }}/bronze/{name}/*/*.parquet',
+        read_parquet('{{ env_var('LAKE_URI', env_var('LAKE_DIR', '../lake')) }}/bronze/{name}/*/*.parquet',
         hive_partitioning = true)
       # Frescura: `dbt source freshness` mira el valor máximo de esta columna
       # (la escribe ingest.py) y avisa si la última ingesta es demasiado antigua.

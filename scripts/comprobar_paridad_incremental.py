@@ -21,13 +21,13 @@ Uso (antes: `uv run simulate-source` y, en transform/, `uv run dbt deps`):
 from __future__ import annotations
 
 import argparse
-import shutil
 import subprocess
 import sys
 
 import duckdb
 
-from credit_risk.config import BRONZE_DIR, LAKE_DIR, LANDING_DIR, ROOT
+from credit_risk import lago
+from credit_risk.config import BRONZE_URI, LAKE_DIR, LANDING_URI, ROOT
 from credit_risk.ingest import entregas_en_landing
 
 MART = "mart_scoring__clientes"
@@ -53,23 +53,25 @@ def dbt_build(*extra: str) -> None:
     )
 
 
-def comparar(con: duckdb.DuckDBPyConnection) -> list[str]:
-    """Diferencias entre mart_incremental (copia) y el mart reconstruido."""
+def comparar(
+    con: duckdb.DuckDBPyConnection, a: str = "mart_incremental", b: str = MART
+) -> list[str]:
+    """Diferencias entre dos versiones del mart (por defecto, la incremental y la
+    reconstruida). a y b pueden ser de otra base de datos adjunta (ATTACH): db.tabla."""
     problemas = []
     filas = con.execute(f"""
-        SELECT (SELECT count(*) FROM mart_incremental), (SELECT count(*) FROM {MART}),
-               (SELECT count(*) FROM mart_incremental JOIN {MART} USING (SK_ID_CURR))
+        SELECT (SELECT count(*) FROM {a}), (SELECT count(*) FROM {b}),
+               (SELECT count(*) FROM {a} JOIN {b} USING (SK_ID_CURR))
     """).fetchone()
-    print(f"Filas: incremental={filas[0]:,}  reconstruido={filas[1]:,}  comunes={filas[2]:,}")
+    print(f"Filas: {a}={filas[0]:,}  {b}={filas[1]:,}  comunes={filas[2]:,}")
     if len(set(filas)) != 1:
         problemas.append(f"distinto número de filas: {filas}")
 
     columnas = con.execute(f"""
-        SELECT column_name, data_type FROM duckdb_columns()
-        WHERE table_name = '{MART}' AND column_name NOT IN ('SK_ID_CURR', '_INGESTED_AT')
-        ORDER BY column_index
+        SELECT column_name, column_type FROM (DESCRIBE {b})
+        WHERE column_name NOT IN ('SK_ID_CURR', '_INGESTED_AT')
     """).fetchall()
-    unir = f"FROM mart_incremental a JOIN {MART} b USING (SK_ID_CURR)"
+    unir = f"FROM {a} a JOIN {b} b USING (SK_ID_CURR)"
     for columna, tipo in columnas:
         c = f'"{columna}"'
         if tipo in ("DOUBLE", "FLOAT") or tipo.startswith("DECIMAL"):
@@ -89,12 +91,12 @@ def main() -> None:
     parser.add_argument("--tandas", type=int, default=3)
     args = parser.parse_args()
 
-    dias = entregas_en_landing(LANDING_DIR)
+    dias = entregas_en_landing(LANDING_URI)
     if not dias:
-        sys.exit(f"No hay entregas en {LANDING_DIR}: ejecuta antes `uv run simulate-source`.")
+        sys.exit(f"No hay entregas en {LANDING_URI}: ejecuta antes `uv run simulate-source`.")
 
     # Lago limpio: bronze y warehouse se reconstruyen desde la landing zone
-    shutil.rmtree(BRONZE_DIR, ignore_errors=True)
+    lago.borrar(BRONZE_URI)
     (LAKE_DIR / "warehouse.duckdb").unlink(missing_ok=True)
 
     # 0) Primera ejecución que no ve ningún dato: crea las tablas incrementales
@@ -115,13 +117,15 @@ def main() -> None:
     # 2) Entrega tardía: un día ya cargado vuelve a llegar. Se elige uno CON
     #    solicitudes (con la muestra hay días vacíos, y reingerir uno de ellos no
     #    pondría nada a prueba).
-    control = (BRONZE_DIR / "_ingestas.parquet").as_posix()
+    control = lago.unir(BRONZE_URI, "_ingestas.parquet")
     con_datos = [
         fila[0]
-        for fila in duckdb.sql(f"""
+        for fila in lago.conectar(control)
+        .sql(f"""
             SELECT fecha_entrega FROM '{control}'
             WHERE tabla = 'application_train' AND filas > 0 ORDER BY 1
-        """).fetchall()
+        """)
+        .fetchall()
     ]
     tardio = con_datos[len(con_datos) // 2]
     print(f"\n== Entrega tardía: se reingiere {tardio}")
