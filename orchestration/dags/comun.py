@@ -25,6 +25,9 @@ POOL_DUCKDB = "duckdb"
 # (schedule=[...]). Airflow une ambos en el grafo de Assets.
 BRONZE = Asset(name="home_credit_bronze", group="credit_risk")
 MART = Asset(name="mart_scoring__clientes", group="credit_risk")
+# Fase 6: el modelo publicado y las puntuaciones que produce
+MODELO = Asset(name="modelo_scoring", group="credit_risk")
+SCORING = Asset(name="scoring", group="credit_risk")
 
 DATOS_VALIDOS = ["muestra", "completo"]
 

@@ -39,6 +39,10 @@ LAKE_URI = os.getenv("LAKE_URI") or LAKE_DIR.as_posix()
 BRONZE_URI = f"{LAKE_URI.rstrip('/')}/bronze"
 LANDING_URI = os.getenv("LANDING_DIR") or f"{LAKE_URI.rstrip('/')}/landing"
 
+# Puntuaciones del modelo (Fase 6.2): un dato listo para consumir, en la zona
+# warehouse del lago, con una partición por modelo.
+SCORING_URI = f"{LAKE_URI.rstrip('/')}/warehouse/scoring"
+
 # Sistema origen simulado (Fase 3.5): el "banco" guarda sus entregas en
 # ORIGEN_RAIZ/<conjunto>/fecha=AAAA-MM-DD/ y las sirve por una API REST
 # (api_origen.py). Nuestra extracción (extract_api.py) la consulta en ORIGEN_API_URL.

@@ -337,9 +337,9 @@ jobs:
   modelo:
     name: Modelo
     runs-on: ubuntu-latest
-    # El final del camino: del mart al modelo de scoring. Tests del entrenamiento y
-    # un entrenamiento real sobre la muestra (rápido: los datos son sintéticos, así
-    # que se comprueba que todo funciona, no la calidad del modelo).
+    # El final del camino: del mart al modelo y a las puntuaciones. Tests y una
+    # ejecución real sobre la muestra (rápida: los datos son sintéticos, así que
+    # se comprueba que todo funciona, no la calidad del modelo).
     env:
       DATA_DIR: ${{ github.workspace }}/tests/fixtures/muestra
       LAKE_DIR: ${{ github.workspace }}/lake
@@ -357,8 +357,8 @@ jobs:
       - name: Instalar Python y las dependencias (con el grupo ml)
         run: uv sync --locked --group ml
 
-      - name: Tests del entrenamiento
-        run: uv run pytest tests/test_modelo.py
+      - name: Tests del entrenamiento y de la puntuación
+        run: uv run pytest tests/test_modelo.py tests/test_scoring.py
 
       - name: Construir el mart sobre la muestra
         run: |
@@ -373,6 +373,11 @@ jobs:
           uv run train-model --prueba
           cat outputs/modelos/vigente/metricas.json
           test -s outputs/modelos/vigente/modelo.txt
+
+      - name: Puntuar con el modelo publicado las solicitudes sin resolver
+        run: |
+          uv run score
+          ls lake/warehouse/scoring/modelo=*/data.parquet
 
   airflow:
     name: Airflow DAGs
