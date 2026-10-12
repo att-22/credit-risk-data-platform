@@ -42,6 +42,8 @@ LANDING_URI = os.getenv("LANDING_DIR") or f"{LAKE_URI.rstrip('/')}/landing"
 # Puntuaciones del modelo (Fase 6.2): un dato listo para consumir, en la zona
 # warehouse del lago, con una partición por modelo.
 SCORING_URI = f"{LAKE_URI.rstrip('/')}/warehouse/scoring"
+# Informes de deriva (Fase 6.3): cuánto se aleja lo que se puntúa del entrenamiento
+DERIVA_URI = f"{LAKE_URI.rstrip('/')}/warehouse/deriva"
 
 # Sistema origen simulado (Fase 3.5): el "banco" guarda sus entregas en
 # ORIGEN_RAIZ/<conjunto>/fecha=AAAA-MM-DD/ y las sirve por una API REST

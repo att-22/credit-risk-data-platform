@@ -25,7 +25,7 @@ Docker / Docker Compose
 - [x] Fase 3 — Ingesta realista: incremental, API, streaming y CDC
 - [x] Fase 4 — Spark, Delta Lake y Databricks
 - [x] Fase 5 — Cloud + Terraform + despliegue continuo (sobre AWS emulado; el despliegue a AWS real está listo pero desactivado)
-- [ ] Fase 6 — La plataforma en uso: modelo de scoring sobre el mart, puntuación por lotes y monitorización (en curso: entrenamiento y puntuación por lotes hechos)
+- [x] Fase 6 — La plataforma en uso: modelo de scoring sobre el mart, puntuación por lotes y monitorización de deriva
 
 ## Arquitectura
 
@@ -186,7 +186,7 @@ flowchart LR
   que las tareas que lo usan se ejecutan de una en una.
 - **Imagen propia:** Airflow y el proyecto (dbt, pandas...) viven en entornos
   virtuales separados dentro de la imagen para que sus dependencias no choquen.
-- **Tests de los DAGs en la CI:** 50 tests que cargan los DAGs dentro de la
+- **Tests de los DAGs en la CI:** 52 tests que cargan los DAGs dentro de la
   imagen de Airflow y comprueban su estructura (Assets, pool, una tarea por
   modelo del manifest, reintentos, comandos existentes en la imagen...).
 
@@ -404,6 +404,37 @@ ingesta ==> bronze ==> transformación ==> mart ==>
                     entrenamiento (manual) ==> modelo ==>
 ```
 
+### Monitorización de deriva
+
+Un modelo se entrena con una población y se usa con otra. Si la segunda se aleja de la
+primera, sus puntuaciones dejan de ser fiables aunque nada "falle".
+[`deriva.py`](src/credit_risk/deriva.py) lo mide con el **PSI** (*Population Stability
+Index*), la medida habitual en riesgo de crédito (< 0,10 estable, 0,10–0,25 cambio
+moderado, > 0,25 importante), a dos niveles:
+
+- **La puntuación del modelo**: cada decil de riesgo debería tener el 10 % de las
+  solicitudes. Es la alarma: por encima del máximo, el comando (y la tarea de Airflow)
+  falla.
+- **Las 30 variables que más pesan en el modelo**, contra una referencia que se guarda
+  al entrenar. Es el diagnóstico: qué ha cambiado.
+
+```bash
+uv run --group ml monitor-drift
+```
+
+Con los datos reales (48.744 solicitudes puntuadas frente a 246.008 de entrenamiento)
+la puntuación es estable, **PSI 0,012**, pero una de las variables principales no:
+`RATIO_CUOTA_CREDITO` (cuota / crédito) tiene un PSI de 1,01. La causa está en los
+propios datos de Kaggle: los créditos *revolving* son el 9,5 % de las solicitudes de
+entrenamiento y solo el 0,9 % de las que se puntúan, y los préstamos en efectivo que
+se puntúan tienen cuotas más altas respecto a su importe (mediana 0,062 frente a
+0,048). Sin alarma, y con algo concreto que vigilar.
+
+Con pocas solicitudes el PSI es ruido (las 52 de la muestra dan 0,54), así que por
+debajo de 1.000 se escribe el informe pero no se da la alarma. En Airflow,
+`vigilar_deriva` se ejecuta después de puntuar, en paralelo a la publicación: una
+alarma no retiene las puntuaciones, avisa de que hay que revisar el modelo.
+
 ## Hallazgos sobre los datos
 
 - **Centinela 365243** (= 1000 años) significa "sin dato" en 6 columnas
@@ -520,7 +551,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 - **CDC (Postgres + Debezium):** levanta Postgres, Debezium y Redpanda, captura un día de cambios y comprueba que la réplica de dbt es idéntica a Postgres.
 - **Terraform (AWS emulado):** ensaya el despliegue contra Moto: bootstrap (bucket del estado, proveedor OIDC, rol de despliegue), estado remoto con bloqueo, plan guardado y su `apply`, un segundo `plan` sin cambios, comprobaciones con boto3 de los recursos y de quién puede asumir el rol de despliegue, y `destroy`.
 - **Lago en S3 (AWS emulado):** Terraform crea el bucket en Moto y el pipeline corre sobre él: tests del acceso al lago contra S3, mismo bronze y mismo mart que en disco y paridad de la carga incremental sobre S3.
-- **Modelo:** tests del entrenamiento y de la puntuación, y una ejecución real sobre el mart construido con la muestra: entrenar, publicar el modelo y puntuar.
+- **Modelo:** tests del entrenamiento, la puntuación y la deriva, y una ejecución real sobre el mart construido con la muestra: entrenar, publicar el modelo, puntuar y vigilar la deriva.
 - **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.
 

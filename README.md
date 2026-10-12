@@ -28,7 +28,7 @@ Docker / Docker Compose
 - [x] Phase 3 — Realistic ingestion: incremental loads, API, streaming and CDC
 - [x] Phase 4 — Spark, Delta Lake and Databricks
 - [x] Phase 5 — Cloud + Terraform + continuous deployment (on emulated AWS; the deployment to real AWS is ready but disabled)
-- [ ] Phase 6 — Putting the platform to use: scoring model on the mart, batch scoring and monitoring (in progress: training and batch scoring done)
+- [x] Phase 6 — Putting the platform to use: scoring model on the mart, batch scoring and drift monitoring
 
 ## Architecture
 
@@ -190,7 +190,7 @@ flowchart LR
   tasks that use it run one at a time.
 - **Custom image:** Airflow and the project (dbt, pandas...) live in separate
   virtual environments inside the image so their dependencies never clash.
-- **DAG tests in CI:** 50 tests load the DAGs inside the Airflow image and check
+- **DAG tests in CI:** 52 tests load the DAGs inside the Airflow image and check
   their structure (Assets, pool, one task per manifest model, retries, commands
   present in the image...).
 
@@ -406,6 +406,36 @@ ingestion ==> bronze ==> transformation ==> mart ==>
                           training (manual) ==> model ==>
 ```
 
+### Drift monitoring
+
+A model is trained on one population and used on another. If the second drifts away
+from the first, its scores stop being reliable even though nothing "fails".
+[`deriva.py`](src/credit_risk/deriva.py) measures it with the **PSI** (Population
+Stability Index), the usual measure in credit risk (< 0.10 stable, 0.10–0.25 moderate
+change, > 0.25 significant), at two levels:
+
+- **The model's score**: each risk decile should hold 10 % of the applications. This
+  is the alarm: above the maximum, the command (and the Airflow task) fails.
+- **The 30 features that weigh most in the model**, against a reference saved at
+  training time. This is the diagnosis: what has changed.
+
+```bash
+uv run --group ml monitor-drift
+```
+
+On the real data (48,744 applications scored against 246,008 used for training) the
+score is stable, **PSI 0.012**, but one of the top features is not:
+`RATIO_CUOTA_CREDITO` (annuity / credit) has a PSI of 1.01. The cause is in the
+Kaggle data itself: revolving loans are 9.5 % of the training applications and only
+0.9 % of the ones being scored, and the cash loans being scored have higher annuities
+relative to their amount (median 0.062 against 0.048). No alarm, and a concrete
+thing to watch.
+
+With few applications the PSI is noise (the 52 of the sample give 0.54), so below
+1,000 the report is written but the alarm is not raised. In Airflow, `vigilar_deriva`
+runs after scoring, in parallel with publishing: an alarm does not withhold the
+scores, it says the model needs reviewing.
+
 ## Findings about the data
 
 - **Sentinel 365243** (= 1,000 years) means "no data" in 6 `DAYS_*` columns. In
@@ -521,7 +551,7 @@ On every PR, GitHub Actions runs in parallel:
 - **CDC (Postgres + Debezium):** starts Postgres, Debezium and Redpanda, captures a day of changes and checks that the dbt replica is identical to Postgres.
 - **Terraform (emulated AWS):** rehearses the deployment against Moto: bootstrap (state bucket, OIDC provider, deploy role), remote state with locking, a saved plan and its `apply`, a second `plan` with no changes, boto3 checks of the resources and of who can assume the deploy role, and `destroy`.
 - **Lake on S3 (emulated AWS):** Terraform creates the bucket in Moto and the pipeline runs on it: lake access tests against S3, same bronze and mart as on disk, and incremental-load parity on S3.
-- **Model:** tests of the training and scoring code, and a real run on the mart built from the sample: train, publish the model and score.
+- **Model:** tests of the training, scoring and drift code, and a real run on the mart built from the sample: train, publish the model, score and monitor drift.
 - **Airflow DAGs:** builds the Airflow image and runs the DAG integrity tests inside it.
 - **Docker build:** builds the image and runs a smoke test.
 
