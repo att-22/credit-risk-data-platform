@@ -23,6 +23,7 @@ from credit_risk.config import (
     MODELS_DIR,
     SCORING_URI,
 )
+from credit_risk.deriva import MINIMO_SOLICITUDES
 
 ALMACEN = LAKE_DIR / "warehouse.duckdb"
 AUC_TFM = 0.7900
@@ -31,7 +32,12 @@ PSI_MODERADO, PSI_IMPORTANTE = 0.10, 0.25
 # Un solo azul para las magnitudes; gris para las referencias. Los colores de estado
 # solo se usan para el estado, y siempre acompañados de su etiqueta escrita.
 AZUL, GRIS = "#2a78d6", "#898781"
-ESTADOS = {"estable": "#0ca30c", "moderado": "#fab219", "importante": "#d03b3b"}
+ESTADOS = {
+    "estable": "#0ca30c",
+    "moderado": "#fab219",
+    "importante": "#d03b3b",
+    "sin valorar": GRIS,  # PSI calculado con muy pocos casos
+}
 ICONO = {"estable": "✅", "moderado": "⚠️", "importante": "🔴"}
 
 st.set_page_config(page_title="Credit Risk Data Platform", page_icon="📊", layout="wide")
@@ -108,6 +114,14 @@ mart = cargar("resumen_mart", ALMACEN)
 modelo = cargar("modelo_vigente", MODELS_DIR)
 informe = cargar("deriva", DERIVA_URI, modelo["modelo"]) if modelo else pd.DataFrame()
 psi_puntuacion = float(informe.iloc[0]["psi"]) if len(informe) else None
+# Con pocas solicitudes el PSI es ruido: se enseña, pero sin darle un estado (la misma
+# regla que aplica el comando monitor-drift para no dar falsas alarmas)
+comparadas = int(informe.iloc[0]["solicitudes"]) if len(informe) else 0
+psi_fiable = comparadas >= MINIMO_SOLICITUDES
+POCO_FIABLE = (
+    f"Con {comparadas} solicitudes (menos de {MINIMO_SOLICITUDES}) el PSI no es fiable: "
+    "cada tramo tiene un puñado de casos y las diferencias son ruido, no deriva."
+)
 
 st.title("Credit Risk Data Platform")
 st.caption(f"Lago: `{LAKE_DIR}` · los datos se releen cada minuto")
@@ -151,7 +165,10 @@ with resumen:
     else:
         situacion = informe.iloc[0]["estado"]
         d.metric("Deriva de la puntuación (PSI)", decimal(psi_puntuacion, 3))
-        d.caption(f"{ICONO[situacion]} {situacion}")
+        if psi_fiable:
+            d.caption(f"{ICONO[situacion]} {situacion}")
+        else:
+            d.caption("no fiable: pocas solicitudes")
 
     st.caption(f"Última ingesta incluida en el mart: {mart['ingerido_hasta']:%d/%m/%Y %H:%M}")
     st.markdown(
@@ -385,14 +402,19 @@ with puntuacion:
             st.info("No hay informe de deriva para este modelo: ejecuta `monitor-drift`.")
         else:
             situacion = informe.iloc[0]["estado"]
-            st.markdown(
-                f"**Puntuación del modelo: PSI {decimal(psi_puntuacion, 3)} — "
-                f"{ICONO[situacion]} {situacion}.** Por debajo de {decimal(PSI_MODERADO, 2)} la "
-                f"población es estable; por encima de {decimal(PSI_IMPORTANTE, 2)} hay que "
-                "revisar el "
-                "modelo."
-            )
+            if psi_fiable:
+                st.markdown(
+                    f"**Puntuación del modelo: PSI {decimal(psi_puntuacion, 3)} — "
+                    f"{ICONO[situacion]} {situacion}.** Por debajo de "
+                    f"{decimal(PSI_MODERADO, 2)} la población es estable; por encima de "
+                    f"{decimal(PSI_IMPORTANTE, 2)} hay que revisar el modelo."
+                )
+            else:
+                st.warning(POCO_FIABLE)
+                st.markdown(f"**Puntuación del modelo: PSI {decimal(psi_puntuacion, 3)}.**")
             variables = informe.iloc[1:].head(15).copy()
+            if not psi_fiable:
+                variables["estado"] = "sin valorar"
             variables["etiqueta"] = variables.apply(
                 lambda f: f"{decimal(f['psi'], 3)} · {f['estado']}", axis=1
             )

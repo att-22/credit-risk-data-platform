@@ -30,6 +30,31 @@ Docker / Docker Compose · Terraform · LightGBM · MLflow · Streamlit
 - [x] Phase 5 — Cloud + Terraform + continuous deployment (on emulated AWS; the deployment to real AWS is ready but disabled)
 - [x] Phase 6 — Putting the platform to use: scoring model on the mart, batch scoring and drift monitoring
 
+## See it working in 5 minutes
+
+No Kaggle download and no Docker: the repository ships a synthetic sample. You only
+need [uv](https://docs.astral.sh/uv/), which installs the right Python.
+
+```bash
+git clone https://github.com/att-22/credit-risk-data-platform.git
+cd credit-risk-data-platform
+export DATA_DIR=tests/fixtures/muestra      # the synthetic sample in the repository
+
+uv sync --group ml --group panel            # dependencies, with the model and the dashboard
+uv run simulate-source                      # the "bank" leaves 30 daily deliveries
+uv run ingest-bronze                        # landing -> bronze (Parquet)
+(cd transform && uv run dbt deps && uv run dbt build)   # bronze -> mart, with its tests
+uv run train-model --prueba                 # trains the model on the mart
+uv run score                                # scores the applications with no outcome
+uv run monitor-drift                        # compares them with the training population
+uv run streamlit run panel/app.py           # opens the dashboard at http://localhost:8501
+```
+
+It takes about two minutes. The sample has 314 customers with shuffled values, so
+the numbers mean nothing (and with 52 applications scored, the dashboard says the
+drift measure is not reliable); what you see is the whole path working, from the
+source files to the dashboard. The screenshots in this README use the full data.
+
 ## Dashboard
 
 Everything the platform produces ends up in Parquet files; the dashboard is where you
@@ -95,6 +120,14 @@ flowchart LR
 | **Gold** | dbt, **incremental** table | Application + financial ratios + income capped at a frozen threshold (train p99.9) + the 5 aggregated histories. Train and test share the same table (`CONJUNTO` column). |
 
 ### dbt model lineage
+
+The dbt documentation (every model, its columns, SQL and tests, and the navigable
+lineage graph) is published on GitHub Pages on every change:
+**[att-22.github.io/credit-risk-data-platform](https://att-22.github.io/credit-risk-data-platform/)**
+
+![dbt lineage graph](docs/img/dbt-linaje.png)
+
+A simplified view of the same graph:
 
 ```mermaid
 flowchart LR
@@ -592,6 +625,10 @@ On every PR, GitHub Actions runs in parallel:
 
 `main` is protected: it can only change through a PR, with green CI and
 *squash merge*.
+
+Two more workflows run outside the PR checks: **Documentación** publishes the dbt
+docs to GitHub Pages when the dbt project changes, and **Despliegue** would apply
+the infrastructure to real AWS (disabled; see above).
 
 ## Data
 
