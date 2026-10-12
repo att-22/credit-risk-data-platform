@@ -18,7 +18,7 @@ and deployable code.
 dbt_expectations) · Apache Airflow 3 · astronomer-cosmos · FastAPI · httpx ·
 Redpanda (Kafka) · confluent-kafka · PostgreSQL · Debezium · Apache Spark
 (PySpark) · Delta Lake · pytest · ruff · pre-commit · GitHub Actions ·
-Docker / Docker Compose
+Docker / Docker Compose · Terraform · LightGBM · MLflow · Streamlit
 
 ## Status
 
@@ -29,6 +29,40 @@ Docker / Docker Compose
 - [x] Phase 4 — Spark, Delta Lake and Databricks
 - [x] Phase 5 — Cloud + Terraform + continuous deployment (on emulated AWS; the deployment to real AWS is ready but disabled)
 - [x] Phase 6 — Putting the platform to use: scoring model on the mart, batch scoring and drift monitoring
+
+## Dashboard
+
+Everything the platform produces ends up in Parquet files; the dashboard is where you
+can see it. A [Streamlit](https://streamlit.io) app
+([`panel/app.py`](panel/app.py)) reads straight from the lake and answers five
+questions, one per tab:
+
+| Tab | Question | Reads from |
+|---|---|---|
+| Resumen | How is the platform today? | everything |
+| Datos | Is the data arriving? Rows per delivery day and per table | bronze control table |
+| Cartera | Who defaults more? Default rate by contract type, education, age, income | the mart |
+| Modelo | Is the model any good? Comparison with the thesis, training history, real default rate per risk decile | MLflow and the current model |
+| Puntuación y deriva | How risky are the new applications, and do they still look like the training ones? | scores and the PSI report |
+
+```bash
+uv run --group panel streamlit run panel/app.py     # http://localhost:8501
+```
+
+![Dashboard: summary](docs/img/panel-resumen.png)
+
+The model tab shows why the score is useful: the real default rate goes from **0.9 %
+in the lowest-risk decile to 30.4 % in the highest**, about 33 times more.
+
+![Dashboard: model](docs/img/panel-modelo.png)
+
+The drift tab shows the stable score next to the one feature that has changed:
+
+![Dashboard: scoring and drift](docs/img/panel-deriva.png)
+
+The queries live in [`panel_datos.py`](src/credit_risk/panel_datos.py), apart from
+the app, so they are tested with pytest; the app itself is tested headless, without
+a browser. The screenshots use the full data.
 
 ## Architecture
 
@@ -531,6 +565,7 @@ In Git Bash (Windows), prefix `docker run` with `MSYS_NO_PATHCONV=1`.
 │   ├── core_bancario/         # schema of the bank's Postgres
 │   └── debezium/              # Debezium Server configuration
 ├── spark/ · spark_jobs/   # Spark + Delta image and PySpark jobs
+├── panel/                 # Streamlit dashboard
 ├── infra/                 # Terraform: S3 lake and IAM role on AWS (emulated with Moto)
 ├── compose.yaml           # the whole local environment with Docker Compose
 ├── scripts/               # synthetic sample, schema contract and parity checks
@@ -551,7 +586,7 @@ On every PR, GitHub Actions runs in parallel:
 - **CDC (Postgres + Debezium):** starts Postgres, Debezium and Redpanda, captures a day of changes and checks that the dbt replica is identical to Postgres.
 - **Terraform (emulated AWS):** rehearses the deployment against Moto: bootstrap (state bucket, OIDC provider, deploy role), remote state with locking, a saved plan and its `apply`, a second `plan` with no changes, boto3 checks of the resources and of who can assume the deploy role, and `destroy`.
 - **Lake on S3 (emulated AWS):** Terraform creates the bucket in Moto and the pipeline runs on it: lake access tests against S3, same bronze and mart as on disk, and incremental-load parity on S3.
-- **Model:** tests of the training, scoring and drift code, and a real run on the mart built from the sample: train, publish the model, score and monitor drift.
+- **Model:** tests of the training, scoring, drift and dashboard code (the app runs headless), and a real run on the mart built from the sample: train, publish the model, score and monitor drift.
 - **Airflow DAGs:** builds the Airflow image and runs the DAG integrity tests inside it.
 - **Docker build:** builds the image and runs a smoke test.
 
