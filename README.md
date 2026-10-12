@@ -27,7 +27,7 @@ Docker / Docker Compose
 - [x] Phase 2 — Orchestration with Airflow 3 (Cosmos, Assets, DAG tests)
 - [x] Phase 3 — Realistic ingestion: incremental loads, API, streaming and CDC
 - [x] Phase 4 — Spark, Delta Lake and Databricks
-- [ ] Phase 5 — Cloud + Terraform + continuous deployment (in progress: Terraform and the lake on S3, on emulated AWS, done)
+- [x] Phase 5 — Cloud + Terraform + continuous deployment (on emulated AWS; the deployment to real AWS is ready but disabled)
 
 ## Architecture
 
@@ -339,6 +339,15 @@ API for disk and S3 ([`lago.py`](src/credit_risk/lago.py)), and dbt uses an `s3`
 target. The dbt warehouse stays local, so storage and compute are separate.
 `scripts/comprobar_paridad_s3.py` runs the whole pipeline twice, on disk and on S3,
 and requires the same bronze files and the same mart, column by column.
+
+**Continuous deployment.** [`deploy.yml`](.github/workflows/deploy.yml) applies
+`infra/` to real AWS when an infrastructure change reaches `main`. It stores no AWS
+keys: GitHub Actions gets one-hour credentials through **OIDC**, from a role that
+can only be assumed from this repository and its `aws-dev` environment. The
+Terraform state lives in an S3 bucket with locking, and the workflow applies the
+exact plan it computed. It is disabled until a repository variable is set;
+[`infra/bootstrap/`](infra/bootstrap) creates what it needs and the CI rehearses the
+same steps against Moto.
 [infra/README.md](infra/README.md) has the details, the Moto quirks found along the
 way and an AWS / Google Cloud / Azure equivalence table.
 
@@ -440,7 +449,7 @@ In Git Bash (Windows), prefix `docker run` with `MSYS_NO_PATHCONV=1`.
 ├── compose.yaml           # the whole local environment with Docker Compose
 ├── scripts/               # synthetic sample, schema contract and parity checks
 ├── tests/                 # pytest tests (unit and integration) and data sample
-├── .github/workflows/     # CI: 11 jobs
+├── .github/workflows/     # CI (11 jobs) and deployment to AWS
 └── Dockerfile             # multi-stage project image, non-root user
 ```
 
@@ -454,7 +463,7 @@ On every PR, GitHub Actions runs in parallel:
 - **Streaming (Redpanda):** starts a broker and runs the producer and consumer integration tests.
 - **Spark:** tests of the PySpark and Delta Lake jobs (with Java 17), parity with dbt on the sample and the Databricks notebook in local mode.
 - **CDC (Postgres + Debezium):** starts Postgres, Debezium and Redpanda, captures a day of changes and checks that the dbt replica is identical to Postgres.
-- **Terraform (emulated AWS):** `fmt`, `validate`, `apply` against Moto, a second `plan` with no changes, a boto3 check of the resources and `destroy`.
+- **Terraform (emulated AWS):** rehearses the deployment against Moto: bootstrap (state bucket, OIDC provider, deploy role), remote state with locking, a saved plan and its `apply`, a second `plan` with no changes, boto3 checks of the resources and of who can assume the deploy role, and `destroy`.
 - **Lake on S3 (emulated AWS):** Terraform creates the bucket in Moto and the pipeline runs on it: lake access tests against S3, same bronze and mart as on disk, and incremental-load parity on S3.
 - **Airflow DAGs:** builds the Airflow image and runs the DAG integrity tests inside it.
 - **Docker build:** builds the image and runs a smoke test.

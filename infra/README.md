@@ -31,7 +31,7 @@ docker compose --profile aws down
 `scripts/comprobar_infra.py` no se fía de Terraform: consulta la API (de Moto o de
 AWS) y falla si el bucket, el ciclo de vida o los permisos del rol no son los
 declarados. La CI (job *Terraform*) hace `fmt`, `validate`, `apply`, `plan` sin
-cambios, esta comprobación y `destroy` en cada PR.
+cambios, esta comprobación y `destroy` en cada PR, con el estado en un bucket.
 
 ## El lago en S3
 
@@ -66,6 +66,48 @@ y en S3, y exige el mismo bronze (240 ficheros, mismas filas) y el mismo mart, c
 a columna. La CI (job *Lago en S3*) lo comprueba en cada PR junto con la paridad de
 la carga incremental sobre S3. Streaming, CDC, Spark y Airflow siguen usando el lago local.
 
+## Despliegue continuo
+
+[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) aplica `infra/` en
+AWS real cada vez que un cambio de la infraestructura llega a `main` (y a mano, desde
+la pestaña *Actions*, para ver un `plan` sin aplicar nada). Está **desactivado**: el
+job se omite mientras no exista la variable de repositorio `AWS_DEPLOY_ROLE_ARN`.
+
+- **Sin claves guardadas (OIDC).** En cada ejecución GitHub firma un token que dice
+  "soy este repositorio, en el environment `aws-dev`". AWS lo valida contra la
+  política de confianza del rol y entrega credenciales que caducan en una hora.
+- **Estado remoto.** El estado de Terraform se guarda en un bucket S3 con bloqueo
+  (`use_lockfile`): dos despliegues a la vez no pueden corromperlo.
+  [`backend.sh`](backend.sh) genera esa configuración; `infra/` no la lleva escrita
+  para que en local baste con `terraform init`.
+- **Se aplica el plan calculado** (`plan -out` y `apply` de ese fichero), y después
+  `comprobar_infra.py` verifica los recursos en AWS.
+
+[`bootstrap/`](bootstrap) crea lo que tiene que existir antes: el bucket del estado,
+el proveedor OIDC de GitHub y el rol de despliegue, que solo se deja asumir desde
+este repositorio y el environment `aws-dev`, y solo puede gestionar los recursos del
+proyecto. Lo aplica una persona, una vez por cuenta. La CI ensaya contra Moto los
+mismos pasos que el despliegue (bootstrap, estado remoto, plan guardado y `apply`).
+
+Para activarlo con una cuenta de AWS:
+
+```bash
+# 1. Con credenciales de administrador de la cuenta, una sola vez:
+terraform -chdir=infra/bootstrap init
+terraform -chdir=infra/bootstrap apply
+
+# 2. Copiar las dos salidas a las variables del repositorio:
+gh variable set TF_STATE_BUCKET     --body "$(terraform -chdir=infra/bootstrap output -raw bucket_estado)"
+gh variable set AWS_DEPLOY_ROLE_ARN --body "$(terraform -chdir=infra/bootstrap output -raw rol_despliegue)"
+```
+
+3. En GitHub, *Settings → Environments → aws-dev*: añadir un revisor obligatorio
+   (la aprobación manual antes de cada `apply`).
+
+Moto no aplica los permisos de IAM, así que la política del rol de despliegue está
+comprobada en su forma (sin comodines, solo recursos del proyecto) pero no ejecutada
+contra AWS: puede necesitar algún permiso más la primera vez.
+
 ## Estructura
 
 | Fichero | Contenido |
@@ -76,9 +118,11 @@ la carga incremental sobre S3. Streaming, CDC, Spark y Airflow siguen usando el 
 | `main.tf` | Recursos |
 | `outputs.tf` | Bucket, URI del lago y ARN del rol |
 | `entornos/*.tfvars` | Valores por entorno (`local` = Moto, `dev` = AWS real) |
+| `backend.sh` | Genera la configuración del estado remoto en S3 |
+| `bootstrap/` | Bucket del estado, proveedor OIDC y rol de despliegue |
 
-El estado (`terraform.tfstate`) es local y no se versiona. En un equipo iría en un
-*backend* remoto (un bucket S3 con bloqueo) para que todos compartan el mismo.
+En local el estado (`terraform.tfstate`) es un fichero que no se versiona. En la CI
+y en el despliegue va a un *backend* remoto (un bucket S3 con bloqueo).
 
 ## Rarezas de Moto (no de nuestro código)
 
