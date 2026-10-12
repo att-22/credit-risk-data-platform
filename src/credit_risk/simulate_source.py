@@ -27,19 +27,22 @@ Uso:
     uv run simulate-source                       # 30 días desde 2026-09-01
     uv run simulate-source --inicio 2026-10-01 --dias 7
     uv run simulate-source --destino lake/origen/completo   # almacén del "banco" (API)
+    uv run simulate-source --destino s3://bucket/landing    # landing en S3 (ver lago.py)
 """
 
 from __future__ import annotations
 
 import argparse
 import shutil
+import tempfile
 import time
 from datetime import date, timedelta
 from pathlib import Path
 
 import duckdb
 
-from credit_risk.config import KEY_BUREAU, KEY_CURR, LANDING_DIR, RAW_DIR, TABLES
+from credit_risk import lago
+from credit_risk.config import KEY_BUREAU, KEY_CURR, LANDING_URI, RAW_DIR, TABLES
 
 INICIO = date(2026, 9, 1)
 DIAS = 30
@@ -71,14 +74,23 @@ def consulta_con_fecha(nombre: str, inicio: date) -> str:
 
 
 def simular_origen(
-    raw_dir: Path, landing_dir: Path, inicio: date = INICIO, dias: int = DIAS
+    raw_dir: Path, landing_dir: str | Path, inicio: date = INICIO, dias: int = DIAS
 ) -> dict[str, int]:
     """Genera la landing zone completa y devuelve las filas escritas por tabla.
 
     Se construye en una carpeta temporal y se sustituye al final, así la
     landing zone nunca queda a medias y repetir la ejecución da el mismo
-    resultado (idempotente).
+    resultado (idempotente). Si el destino está en S3, se genera en local y se
+    sube, como haría el sistema del banco.
     """
+    if lago.es_s3(landing_dir):
+        with tempfile.TemporaryDirectory() as carpeta:
+            local = Path(carpeta) / "landing"
+            filas = simular_origen(raw_dir, local, inicio, dias)
+            lago.subir(local, lago.ruta(landing_dir))
+        return filas
+
+    landing_dir = Path(landing_dir)
     temporal = landing_dir.with_name(landing_dir.name + ".tmp")
     shutil.rmtree(temporal, ignore_errors=True)
     temporal.mkdir(parents=True)  # COPY de DuckDB no crea las carpetas padre
@@ -146,9 +158,8 @@ def main() -> None:
     parser.add_argument("--dias", type=int, default=DIAS)
     parser.add_argument(
         "--destino",
-        type=Path,
-        default=LANDING_DIR,
-        help="carpeta de salida (por defecto, la landing)",
+        default=LANDING_URI,
+        help="carpeta de salida, local o s3:// (por defecto, la landing)",
     )
     args = parser.parse_args()
 
@@ -158,7 +169,7 @@ def main() -> None:
     filas = simular_origen(RAW_DIR, args.destino, args.inicio, args.dias)
     for nombre, n in filas.items():
         print(f"[OK] {nombre:<22} {n:>12,} filas")
-    entregas = sorted(p.name for p in args.destino.glob("fecha=*"))
+    entregas = [lago.nombre(p) for p in lago.subcarpetas(args.destino, "fecha=")]
     print(f"\n{len(entregas)} entregas ({entregas[0]} ... {entregas[-1]})")
     print(f"Completado en {time.perf_counter() - inicio:.1f} s")
 

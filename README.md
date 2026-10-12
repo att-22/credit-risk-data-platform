@@ -27,7 +27,7 @@ Docker / Docker Compose
 - [x] Phase 2 — Orchestration with Airflow 3 (Cosmos, Assets, DAG tests)
 - [x] Phase 3 — Realistic ingestion: incremental loads, API, streaming and CDC
 - [x] Phase 4 — Spark, Delta Lake and Databricks
-- [ ] Phase 5 — Cloud + Terraform + continuous deployment (in progress: Terraform on emulated AWS done)
+- [ ] Phase 5 — Cloud + Terraform + continuous deployment (in progress: Terraform and the lake on S3, on emulated AWS, done)
 
 ## Architecture
 
@@ -331,6 +331,14 @@ uv run --group aws python scripts/comprobar_infra.py   # independent check with 
 
 `scripts/comprobar_infra.py` does not trust Terraform: it asks the AWS API whether
 the bucket, the lifecycle rules and the role's permissions are the declared ones.
+
+**The lake on S3.** With `LAKE_URI=s3://<bucket>` the landing zone and bronze live in
+the bucket instead of on disk, and nothing else in the pipeline changes: DuckDB reads
+and writes the data through `httpfs`, `pyarrow.fs` handles the folders with the same
+API for disk and S3 ([`lago.py`](src/credit_risk/lago.py)), and dbt uses an `s3`
+target. The dbt warehouse stays local, so storage and compute are separate.
+`scripts/comprobar_paridad_s3.py` runs the whole pipeline twice, on disk and on S3,
+and requires the same bronze files and the same mart, column by column.
 [infra/README.md](infra/README.md) has the details, the Moto quirks found along the
 way and an AWS / Google Cloud / Azure equivalence table.
 
@@ -432,7 +440,7 @@ In Git Bash (Windows), prefix `docker run` with `MSYS_NO_PATHCONV=1`.
 ├── compose.yaml           # the whole local environment with Docker Compose
 ├── scripts/               # synthetic sample, schema contract and parity checks
 ├── tests/                 # pytest tests (unit and integration) and data sample
-├── .github/workflows/     # CI: 10 jobs
+├── .github/workflows/     # CI: 11 jobs
 └── Dockerfile             # multi-stage project image, non-root user
 ```
 
@@ -447,6 +455,7 @@ On every PR, GitHub Actions runs in parallel:
 - **Spark:** tests of the PySpark and Delta Lake jobs (with Java 17), parity with dbt on the sample and the Databricks notebook in local mode.
 - **CDC (Postgres + Debezium):** starts Postgres, Debezium and Redpanda, captures a day of changes and checks that the dbt replica is identical to Postgres.
 - **Terraform (emulated AWS):** `fmt`, `validate`, `apply` against Moto, a second `plan` with no changes, a boto3 check of the resources and `destroy`.
+- **Lake on S3 (emulated AWS):** Terraform creates the bucket in Moto and the pipeline runs on it: lake access tests against S3, same bronze and mart as on disk, and incremental-load parity on S3.
 - **Airflow DAGs:** builds the Airflow image and runs the DAG integrity tests inside it.
 - **Docker build:** builds the image and runs a smoke test.
 
