@@ -28,6 +28,7 @@ Docker / Docker Compose
 - [x] Phase 3 — Realistic ingestion: incremental loads, API, streaming and CDC
 - [x] Phase 4 — Spark, Delta Lake and Databricks
 - [x] Phase 5 — Cloud + Terraform + continuous deployment (on emulated AWS; the deployment to real AWS is ready but disabled)
+- [ ] Phase 6 — Putting the platform to use: scoring model on the mart, batch scoring and monitoring (in progress: training done)
 
 ## Architecture
 
@@ -351,6 +352,36 @@ same steps against Moto.
 [infra/README.md](infra/README.md) has the details, the Moto quirks found along the
 way and an AWS / Google Cloud / Azure equivalence table.
 
+## Scoring model
+
+The mart is not the end of the road: [`modelo.py`](src/credit_risk/modelo.py) trains
+on it the same model the master's thesis trained from notebooks, under the same
+conditions (LightGBM with the hyperparameters tuned there, and exactly the same
+61,503 test applications, reproduced by sorting the mart and using the same seed).
+
+| | AUC | Gini | Features | Trees |
+|---|---|---|---|---|
+| Thesis (notebooks, pandas) | 0.7900 | 0.5800 | 583 | 1,002 |
+| Platform (dbt mart) | 0.7898 | 0.5796 | 579 | 889 |
+
+Customer by customer, the two models' scores have a Spearman correlation of 0.993 and
+agree on 93 % of the applications each places in the riskiest 10 %. They are two
+equivalent implementations; the difference is that this one starts from versioned,
+tested SQL, runs incrementally and is orchestrated.
+
+- **Preparation learned from the training set only** (one-hot encoding, dropping
+  empty or constant columns) and saved with the model, so data scored later gets
+  exactly the same treatment.
+- **Experiment tracking with MLflow**: parameters, metrics, files, the commit and
+  which version of the mart each model was trained on.
+- **Quality gate**: a model is only published as the current one if its test AUC
+  reaches a minimum; otherwise the previous one stays.
+
+```bash
+uv run --group ml train-model --auc-minimo 0.78
+uvx mlflow ui --backend-store-uri sqlite:///outputs/mlflow.db --port 5001
+```
+
 ## Findings about the data
 
 - **Sentinel 365243** (= 1,000 years) means "no data" in 6 `DAYS_*` columns. In
@@ -449,7 +480,7 @@ In Git Bash (Windows), prefix `docker run` with `MSYS_NO_PATHCONV=1`.
 ├── compose.yaml           # the whole local environment with Docker Compose
 ├── scripts/               # synthetic sample, schema contract and parity checks
 ├── tests/                 # pytest tests (unit and integration) and data sample
-├── .github/workflows/     # CI (11 jobs) and deployment to AWS
+├── .github/workflows/     # CI (12 jobs) and deployment to AWS
 └── Dockerfile             # multi-stage project image, non-root user
 ```
 
@@ -465,6 +496,7 @@ On every PR, GitHub Actions runs in parallel:
 - **CDC (Postgres + Debezium):** starts Postgres, Debezium and Redpanda, captures a day of changes and checks that the dbt replica is identical to Postgres.
 - **Terraform (emulated AWS):** rehearses the deployment against Moto: bootstrap (state bucket, OIDC provider, deploy role), remote state with locking, a saved plan and its `apply`, a second `plan` with no changes, boto3 checks of the resources and of who can assume the deploy role, and `destroy`.
 - **Lake on S3 (emulated AWS):** Terraform creates the bucket in Moto and the pipeline runs on it: lake access tests against S3, same bronze and mart as on disk, and incremental-load parity on S3.
+- **Model:** tests of the training code and a real training run on the mart built from the sample, publishing the model.
 - **Airflow DAGs:** builds the Airflow image and runs the DAG integrity tests inside it.
 - **Docker build:** builds the image and runs a smoke test.
 

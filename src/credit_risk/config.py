@@ -63,6 +63,14 @@ TOPIC_CDC = os.getenv("TOPIC_CDC", "cdc.core.solicitudes")
 # apunta al repositorio y hay que indicar la carpeta desde fuera.
 OUTPUTS_DIR = Path(os.getenv("OUTPUTS_DIR", ROOT / "outputs"))
 
+# Modelo de scoring (Fase 6): cada entrenamiento deja su modelo en MODELS_DIR/<fecha>/
+# y el que usa la puntuación es MODELS_DIR/vigente. MLflow guarda el registro de los
+# experimentos en una base de datos SQLite, sin servidor.
+MODELS_DIR = Path(os.getenv("MODELS_DIR", OUTPUTS_DIR / "modelos"))
+MLFLOW_URI = (
+    os.getenv("MLFLOW_TRACKING_URI") or f"sqlite:///{(OUTPUTS_DIR / 'mlflow.db').as_posix()}"
+)
+
 # Semilla para reproducibilidad
 RANDOM_STATE = 42
 

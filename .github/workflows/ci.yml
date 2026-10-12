@@ -334,6 +334,46 @@ jobs:
       # Sin destroy: el runner se descarta, y Moto falla al vaciar un bucket
       # versionado con objetos borrados (ver infra/README.md)
 
+  modelo:
+    name: Modelo
+    runs-on: ubuntu-latest
+    # El final del camino: del mart al modelo de scoring. Tests del entrenamiento y
+    # un entrenamiento real sobre la muestra (rápido: los datos son sintéticos, así
+    # que se comprueba que todo funciona, no la calidad del modelo).
+    env:
+      DATA_DIR: ${{ github.workspace }}/tests/fixtures/muestra
+      LAKE_DIR: ${{ github.workspace }}/lake
+      OUTPUTS_DIR: ${{ github.workspace }}/outputs
+      MLFLOW_DISABLE_AGENT_HINT: "1"
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v5
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Instalar Python y las dependencias (con el grupo ml)
+        run: uv sync --locked --group ml
+
+      - name: Tests del entrenamiento
+        run: uv run pytest tests/test_modelo.py
+
+      - name: Construir el mart sobre la muestra
+        run: |
+          uv run simulate-source
+          uv run ingest-bronze
+          cd transform
+          uv run dbt deps
+          uv run dbt build --select +mart_scoring__clientes --exclude test_type:data
+
+      - name: Entrenar sobre el mart y publicar el modelo
+        run: |
+          uv run train-model --prueba
+          cat outputs/modelos/vigente/metricas.json
+          test -s outputs/modelos/vigente/modelo.txt
+
   airflow:
     name: Airflow DAGs
     runs-on: ubuntu-latest

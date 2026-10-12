@@ -25,6 +25,7 @@ Docker / Docker Compose
 - [x] Fase 3 — Ingesta realista: incremental, API, streaming y CDC
 - [x] Fase 4 — Spark, Delta Lake y Databricks
 - [x] Fase 5 — Cloud + Terraform + despliegue continuo (sobre AWS emulado; el despliegue a AWS real está listo pero desactivado)
+- [ ] Fase 6 — La plataforma en uso: modelo de scoring sobre el mart, puntuación por lotes y monitorización (en curso: entrenamiento hecho)
 
 ## Arquitectura
 
@@ -348,6 +349,37 @@ pasos contra Moto.
 [infra/README.md](infra/README.md) tiene los detalles, las rarezas de Moto
 encontradas por el camino y una tabla de equivalencias AWS / Google Cloud / Azure.
 
+## Modelo de scoring
+
+El mart no es el final del camino: [`modelo.py`](src/credit_risk/modelo.py) entrena
+sobre él el mismo modelo que el TFM entrenó a partir de notebooks, en las mismas
+condiciones (LightGBM con los hiperparámetros que se ajustaron allí y exactamente las
+mismas 61.503 solicitudes de prueba, reproducidas ordenando el mart y con la misma
+semilla).
+
+| | AUC | Gini | Variables | Árboles |
+|---|---|---|---|---|
+| TFM (notebooks, pandas) | 0,7900 | 0,5800 | 583 | 1.002 |
+| Plataforma (mart de dbt) | 0,7898 | 0,5796 | 579 | 889 |
+
+Cliente a cliente, las puntuaciones de los dos modelos tienen una correlación de
+Spearman de 0,993 y coinciden en el 93 % de las solicitudes que cada uno sitúa en el
+10 % de más riesgo. Son dos implementaciones equivalentes; la diferencia es que esta
+parte de SQL versionado y testeado, es incremental y está orquestada.
+
+- **Preparación aprendida solo con el entrenamiento** (one-hot, eliminación de
+  columnas vacías o constantes) y guardada con el modelo, para que los datos que se
+  puntúen después reciban exactamente el mismo tratamiento.
+- **Registro de experimentos con MLflow**: parámetros, métricas, ficheros, el commit
+  y con qué versión del mart se entrenó cada modelo.
+- **Control de calidad**: un modelo solo se publica como vigente si su AUC de prueba
+  alcanza un mínimo; si no, sigue el anterior.
+
+```bash
+uv run --group ml train-model --auc-minimo 0.78
+uvx mlflow ui --backend-store-uri sqlite:///outputs/mlflow.db --port 5001
+```
+
 ## Hallazgos sobre los datos
 
 - **Centinela 365243** (= 1000 años) significa "sin dato" en 6 columnas
@@ -447,7 +479,7 @@ En Git Bash (Windows) hay que anteponer `MSYS_NO_PATHCONV=1` a `docker run`.
 ├── compose.yaml           # todo el entorno local con Docker Compose
 ├── scripts/               # muestra sintética, contrato de esquema y comprobaciones de paridad
 ├── tests/                 # tests de pytest (unitarios y de integración) y muestra de datos
-├── .github/workflows/     # CI (11 jobs) y despliegue a AWS
+├── .github/workflows/     # CI (12 jobs) y despliegue a AWS
 └── Dockerfile             # imagen multi-stage del proyecto, usuario sin root
 ```
 
@@ -463,6 +495,7 @@ En cada PR, GitHub Actions ejecuta en paralelo:
 - **CDC (Postgres + Debezium):** levanta Postgres, Debezium y Redpanda, captura un día de cambios y comprueba que la réplica de dbt es idéntica a Postgres.
 - **Terraform (AWS emulado):** ensaya el despliegue contra Moto: bootstrap (bucket del estado, proveedor OIDC, rol de despliegue), estado remoto con bloqueo, plan guardado y su `apply`, un segundo `plan` sin cambios, comprobaciones con boto3 de los recursos y de quién puede asumir el rol de despliegue, y `destroy`.
 - **Lago en S3 (AWS emulado):** Terraform crea el bucket en Moto y el pipeline corre sobre él: tests del acceso al lago contra S3, mismo bronze y mismo mart que en disco y paridad de la carga incremental sobre S3.
+- **Modelo:** tests del entrenamiento y un entrenamiento real sobre el mart construido con la muestra, que publica el modelo.
 - **Airflow DAGs:** construye la imagen de Airflow y ejecuta dentro los tests de integridad de los DAGs.
 - **Docker build:** construcción de la imagen y prueba de humo.
 
